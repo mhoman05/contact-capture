@@ -1,0 +1,16 @@
+name = "contact-capture"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Origin(s) of the GitHub Pages site that hosts the app: scheme + host, no path, comma separated.
+# Both of your accounts are listed so it works wherever you create the repo; remove the one you do not use.
+ALLOWED_ORIGIN = "https://mhoman05.github.io,https://matthias-sport.github.io"
+# Notion databases of the Work CRM (People, Companies, Interactions).
+NOTION_PEOPLE_DB = "1af97b4b13734867b105b6afc71ff37f"
+NOTION_COMPANIES_DB = "1bbdff67c9cb4035a19eee26e50abe48"
+NOTION_INTERACTIONS_DB = "51d15aee672b41ebbe2fb1a948c23eca"
+# MODEL = "claude-opus-5-5"   # optional override; this is the default
+
+# Secrets, never put these in this file: ANTHROPIC_API_KEY, NOTION_TOKEN, CAPTURE_TOKEN
