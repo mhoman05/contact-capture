@@ -36,6 +36,11 @@ jobs:
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       CAPTURE_TOKEN: ${{ secrets.CAPTURE_TOKEN }}
     steps:
+          - name: Which secrets does this run see?
+        run: |
+          for n in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID ANTHROPIC_API_KEY NOTION_TOKEN CAPTURE_TOKEN; do
+            if [ -n "${!n}" ]; then echo "$n: set"; else echo "$n: MISSING"; fi
+          done
       - name: Skip until the secrets exist
         if: env.CLOUDFLARE_API_TOKEN == '' || env.CLOUDFLARE_ACCOUNT_ID == '' || env.ANTHROPIC_API_KEY == '' || env.NOTION_TOKEN == '' || env.CAPTURE_TOKEN == ''
         run: echo "::warning::Deploy skipped, add the five repository secrets listed in README.md first."
