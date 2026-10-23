@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#1f6f5c">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<title>Contact capture</title>
+<style>
+:root{
+  --bg:#f5f6f3;--card:#fff;--ink:#1a2220;--mute:#65706b;--line:#e2e5e0;--soft:#eef1ed;
+  --accent:#1f6f5c;--accent-ink:#fff;--warn:#a85d00;--warn-bg:#fff3df;--bad:#b3261e;--bad-bg:#fdecea;--ok:#1f6f5c;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#121615;--card:#1b2120;--ink:#e8ece9;--mute:#98a39e;--line:#2b3331;--soft:#242b29;
+    --accent:#4fb89c;--accent-ink:#0c1512;--warn:#f0b05a;--warn-bg:#33270f;--bad:#f2867f;--bad-bg:#3a1a18;--ok:#4fb89c;}
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2}
+header h1{font-size:18px;margin:0;flex:1}
+main{max-width:560px;margin:0 auto;padding:16px;display:grid;gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+.card h2{font-size:15px;margin:0 0 8px}
+label{display:block;font-size:14px;color:var(--mute);margin:10px 0 4px}
+input[type=text],input[type=url],input[type=password],textarea{width:100%;font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);
+  border-radius:10px;padding:11px 12px;min-height:44px}
+textarea{min-height:88px;resize:vertical}
+button,.btn{font:inherit;border:1px solid var(--line);background:var(--soft);color:var(--ink);border-radius:10px;padding:10px 14px;min-height:44px;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600;width:100%;min-height:50px}
+button:disabled{opacity:.5;cursor:default}
+button.icon{padding:0;width:44px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>*{flex:1}
+.thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;margin-bottom:10px}
+.thumb{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--soft);border:1px solid var(--line)}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb button{position:absolute;top:4px;right:4px;min-height:30px;width:30px;padding:0;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;border:0}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.chip{font-size:13px;padding:4px 10px;min-height:0;border-radius:999px}
+.check{display:flex;align-items:flex-start;gap:10px;margin-top:12px;color:var(--ink);font-size:15px}
+.check input{width:22px;height:22px;margin:1px 0 0;flex:none}
+.muted{color:var(--mute);font-size:14px}
+.hidden{display:none!important}
+.res{border-left:4px solid var(--ok);padding-left:12px;margin-top:12px}
+.res:first-child{margin-top:0}
+.res b{font-size:17px}
+.tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;background:var(--soft);margin:2px 4px 0 0}
+.warn{background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:8px 10px;margin-top:8px;font-size:14px}
+.err{background:var(--bad-bg);color:var(--bad);border-radius:10px;padding:10px 12px;font-size:15px}
+.spin{width:18px;height:18px;border:3px solid currentColor;border-right-color:transparent;border-radius:50%;animation:s .8s linear infinite}
+@keyframes s{to{transform:rotate(360deg)}}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Add contact</h1>
+  <button class="icon" id="gear" aria-label="Settings" title="Settings">⚙</button>
+</header>
+
+<main>
+  <section class="card hidden" id="setup">
+    <h2>Enter your access token</h2>
+    <p class="muted">Type the access token you chose. It is stored only on this phone. The service address is already filled in.</p>
+    <label for="wurl">Service address</label>
+    <input type="url" id="wurl" inputmode="url" autocomplete="off" placeholder="https://contact-capture.your-name.workers.dev">
+    <label for="wtok">Access token</label>
+    <input type="password" id="wtok" autocomplete="off">
+    <div class="row" style="margin-top:12px">
+      <button id="save" class="primary">Save</button>
+      <button id="test">Test connection</button>
+    </div>
+    <p class="muted" id="setupMsg" role="status"></p>
+  </section>
+
+  <section class="card" id="capture">
+    <div class="thumbs hidden" id="thumbs"></div>
+    <div class="row">
+      <label class="btn" for="cam">📷 Take photo</label>
+      <label class="btn" for="pick">🖼 Choose photos</label>
+    </div>
+    <input type="file" id="cam" accept="image/*" capture="environment" hidden>
+    <input type="file" id="pick" accept="image/*" multiple hidden>
+
+    <div id="textWrap" class="hidden">
+      <label for="text">Shared text (for example an email signature)</label>
+      <textarea id="text"></textarea>
+    </div>
+    <button class="chip" id="showText" type="button" style="margin-top:10px">Paste text instead</button>
+
+    <label for="note">Where or how did you meet?</label>
+    <input type="text" id="note" autocomplete="off" placeholder="MERGE Madrid, introduced by Andrei…">
+    <div class="chips" id="recent"></div>
+
+    <label class="check"><input type="checkbox" id="meet" checked><span>Also log an “In person” meeting today<br><span class="muted">Counts as contact in your follow-up cadence.</span></span></label>
+
+    <button class="primary" id="send" style="margin-top:16px" disabled>Add to CRM</button>
+  </section>
+
+  <section class="card hidden" id="result" aria-live="polite"></section>
+</main>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get(k, d = '') { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode: nothing to remember */ } },
+  };
+  const state = { images: [], busy: false }; // images: {blob, url}
+
+  // ---- settings ----------------------------------------------------------------
+  // A setup link like  https://your-worker.workers.dev/#t=token  fills the token in (add &w=… to also set the service address) and is then removed from the address bar.
+  function importFromHash() {
+    const p = new URLSearchParams(location.hash.slice(1));
+    if (!p.get('w') && !p.get('t')) return false;
+    if (p.get('w')) store.set('cc.url', p.get('w'));
+    if (p.get('t')) store.set('cc.tok', p.get('t'));
+    history.replaceState(null, '', location.pathname + location.search);
+    return true;
+  }
+  importFromHash();
+  window.addEventListener('hashchange', () => { if (importFromHash()) { showSetup(!configured()); refresh(); } });
+  // The app is served by the same Worker that does the work, so its own address is the default service address.
+  const cfg = () => ({ url: (store.get('cc.url') || location.origin).replace(/\/+$/, ''), tok: store.get('cc.tok') });
+  const configured = () => !!(cfg().url && cfg().tok);
+
+  function showSetup(show) {
+    $('setup').classList.toggle('hidden', !show);
+    if (show) { $('wurl').value = cfg().url; $('wtok').value = cfg().tok; }
+  }
+  $('gear').onclick = () => showSetup($('setup').classList.contains('hidden'));
+  $('save').onclick = () => {
+    const url = $('wurl').value.trim();
+    if (!/^https:\/\/[^\s/]+/.test(url)) { $('setupMsg').textContent = 'The address must start with https://'; return; }
+    store.set('cc.url', url);
+    store.set('cc.tok', $('wtok').value.trim());
+    $('setupMsg').textContent = 'Saved.';
+    showSetup(false);
+    refresh();
+  };
+  $('test').onclick = async () => {
+    const url = $('wurl').value.trim().replace(/\/+$/, '');
+    $('setupMsg').textContent = 'Testing…';
+    try {
+      const r = await fetch(url + '/health');
+      $('setupMsg').textContent = r.ok ? 'The service answers.' : 'The service answered with an error (' + r.status + ').';
+    } catch { $('setupMsg').textContent = 'Could not reach that address.'; }
+  };
+
+  // ---- inputs ------------------------------------------------------------------
+  function addBlob(blob) {
+    state.images.push({ blob, url: URL.createObjectURL(blob) });
+  }
+  function renderThumbs() {
+    const box = $('thumbs');
+    box.replaceChildren();
+    state.images.forEach((im, i) => {
+      const d = document.createElement('div'); d.className = 'thumb';
+      const img = document.createElement('img'); img.src = im.url; img.alt = 'Photo ' + (i + 1);
+      const x = document.createElement('button'); x.type = 'button'; x.textContent = '×'; x.setAttribute('aria-label', 'Remove photo ' + (i + 1));
+      x.onclick = () => { URL.revokeObjectURL(im.url); state.images.splice(i, 1); refresh(); };
+      d.append(img, x); box.append(d);
+    });
+    box.classList.toggle('hidden', state.images.length === 0);
+  }
+  function refresh() {
+    renderThumbs();
+    const hasText = $('text').value.trim().length > 0;
+    $('textWrap').classList.toggle('hidden', !hasText && $('showText').dataset.open !== '1');
+    $('showText').classList.toggle('hidden', !$('textWrap').classList.contains('hidden'));
+    $('send').disabled = state.busy || !(state.images.length || hasText) || !configured();
+    $('send').textContent = !configured() ? 'Connect the service first (⚙)' : 'Add to CRM';
+  }
+  for (const id of ['cam', 'pick']) {
+    $(id).onchange = (e) => { for (const f of e.target.files) addBlob(f); e.target.value = ''; refresh(); };
+  }
+  $('showText').onclick = () => { $('showText').dataset.open = '1'; refresh(); $('text').focus(); };
+  $('text').oninput = refresh;
+
+  const recent = () => { try { return JSON.parse(store.get('cc.recent', '[]')); } catch { return []; } };
+  function renderRecent() {
+    const box = $('recent'); box.replaceChildren();
+    for (const r of recent()) {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = r;
+      b.onclick = () => { $('note').value = r; };
+      box.append(b);
+    }
+  }
+  function rememberNote(n) {
+    if (!n) return;
+    store.set('cc.recent', JSON.stringify([n, ...recent().filter((x) => x !== n)].slice(0, 4)));
+    renderRecent();
+  }
+
+  // What the Android share sheet delivered (stored by sw.js)
+  async function loadShared() {
+    if (!new URLSearchParams(location.search).has('shared') || !('caches' in window)) return;
+    history.replaceState(null, '', location.pathname);
+    try {
+      const cache = await caches.open('cc-shared');
+      for (const req of await cache.keys()) {
+        const res = await cache.match(req);
+        if (req.url.endsWith('/text')) $('text').value = await res.text();
+        else if (req.url.includes('/image-')) addBlob(await res.blob());
+      }
+    } catch { /* nothing shared */ }
+    refresh();
+  }
+  const clearShared = () => ('caches' in window ? caches.delete('cc-shared').catch(() => {}) : null);
+
+  // ---- sending -----------------------------------------------------------------
+  // Phone photos are 3–10 MB. Reading a card needs far less, so shrink before upload (also keeps mobile data use low).
+  async function toJpegBase64(blob, maxSide = 1600) {
+    const bmp = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+    const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close?.();
+    const out = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.88));
+    const bytes = new Uint8Array(await out.arrayBuffer());
+    let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+  const localDate = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+
+  function showResult(nodes) { const r = $('result'); r.replaceChildren(...nodes); r.classList.remove('hidden'); r.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+
+  function renderOutcome(data) {
+    const nodes = [];
+    for (const r of data.results || []) {
+      const box = el('div', 'res');
+      const verb = r.action === 'created' ? 'Added' : r.action === 'updated' ? 'Updated' : 'Already complete';
+      const head = el('div'); head.append(el('b', '', r.name), el('span', 'muted', ' · ' + verb + (r.company ? ' · ' + r.company : '')));
+      box.append(head);
+      if (r.added?.length) { const t = el('div'); r.added.forEach((a) => t.append(el('span', 'tag', a))); box.append(t); }
+      for (const w of r.warnings || []) box.append(el('div', 'warn', w));
+      const links = el('div'); links.style.marginTop = '8px';
+      const a = el('a', '', 'Open in Notion'); a.href = r.page_url; a.target = '_blank'; a.rel = 'noopener';
+      links.append(a); box.append(links);
+      nodes.push(box);
+    }
+    for (const e of data.errors || []) nodes.push(el('div', 'err', e));
+    if (!nodes.length) nodes.push(el('div', 'muted', 'No contact details could be read. Try a sharper photo, or paste the text.'));
+    const again = el('button', '', 'Add another'); again.style.marginTop = '12px';
+    again.onclick = () => { $('result').classList.add('hidden'); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+    nodes.push(again);
+    showResult(nodes);
+  }
+
+  $('send').onclick = async () => {
+    if (state.busy) return;
+    state.busy = true;
+    const btn = $('send'); btn.disabled = true; btn.replaceChildren(el('span', 'spin'), document.createTextNode(' Reading and filing…'));
+    $('result').classList.add('hidden');
+    const note = $('note').value.trim();
+    try {
+      const images = [];
+      for (const im of state.images) images.push({ media_type: 'image/jpeg', data: await toJpegBase64(im.blob) });
+      const c = new AbortController(); const timer = setTimeout(() => c.abort(), 120000);
+      const res = await fetch(cfg().url + '/capture', {
+        method: 'POST', signal: c.signal,
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg().tok },
+        body: JSON.stringify({ images, text: $('text').value.trim(), note, today: localDate(), log_meeting: $('meet').checked }),
+      }).finally(() => clearTimeout(timer));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = res.status === 401 ? 'The access token was not accepted. Check it in settings (⚙).' : (data.error || 'Something went wrong (' + res.status + ').');
+        showResult([el('div', 'err', msg)]);
+      } else {
+        renderOutcome(data);
+        if ((data.results || []).length) {
+          rememberNote(note);
+          state.images.forEach((i) => URL.revokeObjectURL(i.url)); state.images = [];
+          $('text').value = ''; $('note').value = ''; $('showText').dataset.open = ''; clearShared();
+        }
+      }
+    } catch (e) {
+      const msg = e.name === 'AbortError' ? 'This took too long. Your photos are still here, try again.' :
+        e instanceof DOMException || /image|bitmap/i.test(String(e)) ? 'This image could not be read. Try another photo.' :
+        'No connection to the service. Your photos are still here, try again.';
+      showResult([el('div', 'err', msg)]);
+    } finally { state.busy = false; refresh(); }
+  };
+
+  // ---- start -------------------------------------------------------------------
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  renderRecent();
+  if (!configured()) showSetup(true);
+  refresh();
+  loadShared();
+})();
+</script>
+</body>
+</html>

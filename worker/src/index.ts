@@ -14,9 +14,15 @@ export function allowedOrigins(env: Env): string[] {
   return (env.ALLOWED_ORIGIN ?? '').split(',').map((o) => o.trim()).filter(Boolean);
 }
 
+function isAllowedOrigin(req: Request, env: Env): boolean {
+  const origin = req.headers.get('Origin');
+  if (!origin) return true; // not a browser request; the access token still decides
+  return origin === new URL(req.url).origin || allowedOrigins(env).includes(origin);
+}
+
 function corsHeaders(req: Request, env: Env): Record<string, string> {
   const origin = req.headers.get('Origin');
-  if (!origin || !allowedOrigins(env).includes(origin)) return {};
+  if (!origin || origin === new URL(req.url).origin || !allowedOrigins(env).includes(origin)) return {};
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
@@ -70,10 +76,17 @@ export default {
     const cors = corsHeaders(req, env);
     const url = new URL(req.url);
 
-    if (req.method === 'OPTIONS') return new Response(null, { status: cors['Access-Control-Allow-Origin'] ? 204 : 403, headers: cors });
     if (url.pathname === '/health') return json({ ok: true }, 200, cors);
-    if (url.pathname !== '/capture' || req.method !== 'POST') return json({ error: 'Not found.' }, 404, cors);
-    if (req.headers.get('Origin') && !cors['Access-Control-Allow-Origin']) return json({ error: 'Origin not allowed.' }, 403);
+    // Android posts shared files here; the app's service worker normally intercepts it. If it is not active yet, just open the app.
+    if (url.pathname === '/share-target') return Response.redirect(new URL('/', url).href, 303);
+    // Everything else is a static file of the app.
+    if (url.pathname !== '/capture') {
+      return env.ASSETS ? env.ASSETS.fetch(req) : json({ error: 'Not found.' }, 404, cors);
+    }
+
+    if (req.method === 'OPTIONS') return new Response(null, { status: cors['Access-Control-Allow-Origin'] ? 204 : 403, headers: cors });
+    if (req.method !== 'POST') return json({ error: 'Use POST.' }, 405, cors);
+    if (!isAllowedOrigin(req, env)) return json({ error: 'Origin not allowed.' }, 403);
 
     const auth = req.headers.get('Authorization') ?? '';
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';

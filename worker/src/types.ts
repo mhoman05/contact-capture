@@ -9,6 +9,8 @@ export interface Env {
   NOTION_COMPANIES_DB: string;
   NOTION_INTERACTIONS_DB: string;
   MODEL?: string;
+  // Static files of the app (the public/ folder), served by Cloudflare. Absent in unit tests.
+  ASSETS?: Fetcher;
 }
 
 export interface ExtractedContact {

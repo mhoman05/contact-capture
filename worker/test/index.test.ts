@@ -59,6 +59,30 @@ describe('access control', () => {
   });
 });
 
+describe('serving the app', () => {
+  const assets = { fetch: async (r: Request) => new Response(`asset:${new URL(r.url).pathname}`) } as unknown as Fetcher;
+  it('serves static files for any other path', async () => {
+    const res = await worker.fetch(new Request('https://w.test/index.html'), { ...env, ASSETS: assets });
+    expect(await res.text()).toBe('asset:/index.html');
+  });
+  it('redirects a share POST that reaches the Worker to the app', async () => {
+    const res = await call('/share-target', { method: 'POST', body: 'x', redirect: 'manual' });
+    expect(res.status).toBe(303);
+    expect(res.headers.get('Location')).toBe('https://w.test/');
+  });
+  it('accepts requests from the same origin the app is served from', async () => {
+    const res = await post({ Authorization: 'Bearer correct horse', Origin: 'https://w.test' }, { images: [] });
+    expect(res.status).toBe(400); // reached validation, so origin and token were accepted
+  });
+  it('still rejects other sites', async () => {
+    const res = await post({ Authorization: 'Bearer correct horse', Origin: 'https://evil.example' }, { text: 'x' });
+    expect(res.status).toBe(403);
+  });
+  it('only allows POST on /capture', async () => {
+    expect((await call('/capture')).status).toBe(405);
+  });
+});
+
 describe('parseRequest', () => {
   const ok = { media_type: 'image/jpeg', data: 'AAAA' };
   it('accepts images and defaults', () => {
