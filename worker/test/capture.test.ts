@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runCapture, type CaptureDeps } from '../src/capture';
 import { parseContacts } from '../src/extract';
 import { NotionClient } from '../src/notion';
@@ -146,6 +146,20 @@ describe('matching existing people', () => {
     expect(results[0].action).toBe('created');
     expect(results[0].warnings[0]).toContain('Possible duplicate of Álvaro Durán Casares');
     expect(fake.rows.filter((r) => r.db === PEOPLE)).toHaveLength(2);
+  });
+});
+
+describe('Cloudflare runtime rules', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('calls the global fetch without a receiver, as Cloudflare requires (it throws "Illegal invocation" otherwise)', async () => {
+    const strict = function (this: unknown, input: RequestInfo | URL, init?: RequestInit) {
+      if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation: function called with incorrect `this` reference.');
+      return fake.fetch(input, init);
+    } as typeof fetch;
+    vi.stubGlobal('fetch', strict);
+    fake.seed(PEOPLE, { Name: title('Existing Person') });
+    const notion = new NotionClient('token'); // default fetch, like the Worker uses
+    await expect(notion.queryAll(PEOPLE)).resolves.toHaveLength(1);
   });
 });
 

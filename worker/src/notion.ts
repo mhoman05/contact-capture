@@ -21,7 +21,9 @@ export interface NotionPage {
 export class NotionClient {
   constructor(
     private readonly token: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    // Wrapped in an arrow function on purpose: Cloudflare Workers throw "Illegal invocation" if the global fetch is
+    // stored on an object and called as a method (this.fetchImpl(...)).
+    private readonly fetchImpl: typeof fetch = (input, init) => fetch(input, init),
   ) {}
 
   async request<T>(method: 'GET' | 'POST' | 'PATCH', path: string, body?: unknown, attempt = 0): Promise<T> {

@@ -59,7 +59,7 @@ The app shrinks photos to 1600 px before sending, so uploads are small even on m
 cd worker
 npm ci
 npm run typecheck
-npm test            # 34 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
+npm test            # 35 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
 ```
 
 Run everything locally with `npx wrangler@4 dev`, putting the three secrets in `worker/.dev.vars` (git-ignored), then open `http://127.0.0.1:8787/`.
