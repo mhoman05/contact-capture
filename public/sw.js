@@ -42,6 +42,7 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   if (r.method !== 'GET' || url.origin !== location.origin) return;
+  if (url.pathname === '/me' || url.pathname === '/health') return; // API answers (your personal details) are never cached here
   e.respondWith(
     fetch(r)
       .then((res) => {

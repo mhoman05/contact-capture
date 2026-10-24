@@ -14,7 +14,7 @@ export class FakeNotion {
   }
 
   private page(row: Row) {
-    return { id: row.id, url: `https://notion.test/${row.id}`, properties: row.properties };
+    return { id: row.id, url: `https://notion.test/${row.id}`, properties: row.properties, parent: { type: 'database_id', database_id: row.db } };
   }
 
   private matches(row: Row, filter: any): boolean {
@@ -50,6 +50,10 @@ export class FakeNotion {
       return ok(this.page(row));
     }
     m = url.pathname.match(/^\/v1\/pages\/([^/]+)$/);
+    if (m && method === 'GET') {
+      const row = this.rows.find((r) => r.id === m![1]);
+      return row ? ok(this.page(row)) : new Response('not found', { status: 404 });
+    }
     if (m && method === 'PATCH') {
       const row = this.rows.find((r) => r.id === m![1])!;
       Object.assign(row.properties, this.normalise(body.properties));

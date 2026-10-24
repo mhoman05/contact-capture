@@ -58,6 +58,7 @@ export async function runCapture(deps: CaptureDeps, req: CaptureRequest): Promis
         name: pageTitle(outcome.page, 'Name') || c.full_name,
         company: company?.name ?? null,
         action: outcome.action,
+        needs_review: outcome.action === 'created',
         page_url: outcome.page.url,
         added: outcome.added,
         interaction_url: interactionUrl,

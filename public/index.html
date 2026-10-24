@@ -48,6 +48,17 @@ button.icon{padding:0;width:44px}
 .check input{width:22px;height:22px;margin:1px 0 0;flex:none}
 .muted{color:var(--mute);font-size:14px}
 .hidden{display:none!important}
+.tabs{display:flex;gap:6px;max-width:560px;margin:12px auto 0;padding:0 16px}
+.tabs button{flex:1;border-radius:999px}
+.tabs button[aria-selected=true]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.item{padding:6px 0;border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+#meStatus.bad{color:var(--bad)}
+.qrbox{background:#fff;border-radius:14px;padding:8px;max-width:340px;margin:0 auto}
+.qrbox canvas{width:100%;height:auto;display:block;image-rendering:pixelated}
+.qrfull{position:fixed;inset:0;background:#fff;z-index:10;display:flex;align-items:center;justify-content:center;padding:16px;color:#000;flex-direction:column;gap:12px}
+.qrfull img{width:min(94vw,80vh);height:auto;image-rendering:pixelated}
+
 .res{border-left:4px solid var(--ok);padding-left:12px;margin-top:12px}
 .res:first-child{margin-top:0}
 .res b{font-size:17px}
@@ -61,18 +72,24 @@ a{color:var(--accent)}
 </head>
 <body>
 <header>
-  <h1>Add contact</h1>
+  <h1 id="title">Add contact</h1>
   <button class="icon" id="gear" aria-label="Settings" title="Settings">⚙</button>
 </header>
 
+<nav class="tabs" role="tablist">
+  <button id="tabAdd" role="tab" aria-selected="true">Add contact</button>
+  <button id="tabQr" role="tab" aria-selected="false">My QR card</button>
+</nav>
+
 <main>
   <section class="card hidden" id="setup">
-    <h2>Enter your access token</h2>
-    <p class="muted">Type the access token you chose. It is stored only on this phone. The service address is already filled in.</p>
+    <h2>Settings</h2>
+    <p class="muted">The access token you chose is stored only on this phone. The service address is already filled in.</p>
     <label for="wurl">Service address</label>
     <input type="url" id="wurl" inputmode="url" autocomplete="off" placeholder="https://contact-capture.your-name.workers.dev">
     <label for="wtok">Access token</label>
     <input type="password" id="wtok" autocomplete="off">
+    <label class="check"><input type="checkbox" id="auto"><span>Send photos straight away when I share them<br><span class="muted">One step: share a photo and it is filed using the note and meeting tickbox as you last left them. Leave off to check first.</span></span></label>
     <div class="row" style="margin-top:12px">
       <button id="save" class="primary">Save</button>
       <button id="test">Test connection</button>
@@ -80,6 +97,7 @@ a{color:var(--accent)}
     <p class="muted" id="setupMsg" role="status"></p>
   </section>
 
+  <div id="addView" style="display:contents">
   <section class="card" id="capture">
     <div class="thumbs hidden" id="thumbs"></div>
     <div class="row">
@@ -94,19 +112,55 @@ a{color:var(--accent)}
       <textarea id="text"></textarea>
     </div>
     <button class="chip" id="showText" type="button" style="margin-top:10px">Paste text instead</button>
+    <p class="muted" id="sigTip" style="margin:8px 0 0">Email signature? Share a screenshot, or select the text and share it. A photo of a screen is often too blurry to read.</p>
 
-    <label for="note">Where or how did you meet?</label>
+    <label for="note">Where or how did you meet? (optional)</label>
     <input type="text" id="note" autocomplete="off" placeholder="MERGE Madrid, introduced by Andrei…">
     <div class="chips" id="recent"></div>
 
-    <label class="check"><input type="checkbox" id="meet" checked><span>Also log an “In person” meeting today<br><span class="muted">Counts as contact in your follow-up cadence.</span></span></label>
+    <label class="check" id="meetWrap"><input type="checkbox" id="meet"><span>I met them in person: log a meeting today<br><span class="muted">Tick when you met them today. Leave unticked for contacts you add later, in bulk, or from an email. Counts as contact in your follow-up cadence.</span></span></label>
 
     <button class="primary" id="send" style="margin-top:16px" disabled>Add to CRM</button>
   </section>
 
   <section class="card hidden" id="result" aria-live="polite"></section>
+  </div>
+
+  <div id="qrView" class="hidden" style="display:contents">
+    <section class="card">
+      <h2>What do you want to share?</h2>
+      <div id="groups"></div>
+      <p class="muted" id="qrSummary" style="margin:10px 0 0"></p>
+    </section>
+
+    <section class="card">
+      <div id="qrNeedName" class="muted">Add your first and last name in the Notion database “My sharing details” (or under Edit values below) to see your QR code.</div>
+      <div id="qrBox" class="qrbox hidden"><canvas id="qrCanvas" aria-label="QR code with your contact details"></canvas></div>
+      <p class="muted hidden" id="qrDense" style="margin:8px 0 0">This code holds a lot of detail. Turn the screen brightness up and hold the phone steady, or untick a group or some details.</p>
+      <p class="muted" style="margin:10px 0 0">The other person opens their phone camera and points it at this code, then taps “Add contact”. No app or account needed.</p>
+      <div class="row hidden" id="qrActions" style="margin-top:12px">
+        <button id="fullBtn" class="primary">Show full screen</button>
+        <button id="shareVcf">Send as contact file</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Details</h2>
+      <p class="muted" style="margin:0 0 6px" id="itemsHint">Nothing filled in yet. Add values in the Notion database “My sharing details”, or tap Edit values.</p>
+      <p class="muted" style="margin:0 0 6px">Tick or untick single details for this person. Your details live in the Notion database “My sharing details”.</p>
+      <div id="items"></div>
+      <div class="row" style="margin-top:10px">
+        <button id="editBtn">Edit values</button>
+        <button id="reloadMe">Reload from Notion</button>
+      </div>
+      <p class="muted" id="meStatus" role="status" style="margin:10px 0 0"></p>
+    </section>
+  </div>
 </main>
 
+<div class="qrfull hidden" id="qrFull" role="dialog" aria-label="QR code, tap to close"><img id="qrFullImg" alt="QR code"><div style="font-size:15px">Tap anywhere to close</div></div>
+
+<script src="qrcode.js"></script>
 <script>
 (() => {
   'use strict';
@@ -157,7 +211,9 @@ a{color:var(--accent)}
   };
 
   // ---- inputs ------------------------------------------------------------------
+  const MAX_PHOTOS = 12;
   function addBlob(blob) {
+    if (state.images.length >= MAX_PHOTOS) { showResult([el('div', 'err', 'Up to ' + MAX_PHOTOS + ' photos at a time. Send these first, then add the rest.')]); return; }
     state.images.push({ blob, url: URL.createObjectURL(blob) });
   }
   function renderThumbs() {
@@ -177,6 +233,7 @@ a{color:var(--accent)}
     const hasText = $('text').value.trim().length > 0;
     $('textWrap').classList.toggle('hidden', !hasText && $('showText').dataset.open !== '1');
     $('showText').classList.toggle('hidden', !$('textWrap').classList.contains('hidden'));
+    $('meetWrap').classList.toggle('hidden', state.images.length === 0); // a signature is never a meeting
     $('send').disabled = state.busy || !(state.images.length || hasText) || !configured();
     $('send').textContent = !configured() ? 'Connect the service first (⚙)' : 'Add to CRM';
   }
@@ -186,12 +243,24 @@ a{color:var(--accent)}
   $('showText').onclick = () => { $('showText').dataset.open = '1'; refresh(); $('text').focus(); };
   $('text').oninput = refresh;
 
+  // Remembered between uses: the meeting tickbox stays as you left it (ticked at an event, unticked for bulk at home),
+  // and the note stays for 12 hours so a run of cards from one event needs no retyping.
+  $('meet').checked = store.get('cc.meet') === '1';
+  $('meet').onchange = () => store.set('cc.meet', $('meet').checked ? '1' : '0');
+  $('auto').checked = store.get('cc.auto') === '1';
+  $('auto').onchange = () => store.set('cc.auto', $('auto').checked ? '1' : '0');
+  function restoreNote() {
+    const at = Number(store.get('cc.noteAt', '0'));
+    if (!$('note').value && at && Date.now() - at < 12 * 3600 * 1000) $('note').value = store.get('cc.note', '');
+  }
+  $('note').oninput = () => { store.set('cc.note', $('note').value); store.set('cc.noteAt', String(Date.now())); };
+
   const recent = () => { try { return JSON.parse(store.get('cc.recent', '[]')); } catch { return []; } };
   function renderRecent() {
     const box = $('recent'); box.replaceChildren();
     for (const r of recent()) {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = r;
-      b.onclick = () => { $('note').value = r; };
+      b.onclick = () => { $('note').value = r; $('note').oninput(); };
       box.append(b);
     }
   }
@@ -214,6 +283,7 @@ a{color:var(--accent)}
       }
     } catch { /* nothing shared */ }
     refresh();
+    if (state.images.length && $('auto').checked && configured()) $('send').click();
   }
   const clearShared = () => ('caches' in window ? caches.delete('cc-shared').catch(() => {}) : null);
 
@@ -243,13 +313,15 @@ a{color:var(--accent)}
       const verb = r.action === 'created' ? 'Added' : r.action === 'updated' ? 'Updated' : 'Already complete';
       const head = el('div'); head.append(el('b', '', r.name), el('span', 'muted', ' · ' + verb + (r.company ? ' · ' + r.company : '')));
       box.append(head);
-      if (r.added?.length) { const t = el('div'); r.added.forEach((a) => t.append(el('span', 'tag', a))); box.append(t); }
+      if (r.added?.length || r.needs_review) { const t = el('div'); if (r.needs_review) t.append(el('span', 'tag', 'Needs review')); (r.added || []).forEach((a) => t.append(el('span', 'tag', a))); box.append(t); }
+      if (r.interaction_url) box.append(el('div', 'muted', 'Meeting logged for today.'));
       for (const w of r.warnings || []) box.append(el('div', 'warn', w));
       const links = el('div'); links.style.marginTop = '8px';
       const a = el('a', '', 'Open in Notion'); a.href = r.page_url; a.target = '_blank'; a.rel = 'noopener';
       links.append(a); box.append(links);
       nodes.push(box);
     }
+    if ((data.results || []).some((r) => r.needs_review)) nodes.push(el('p', 'muted', 'New people are marked “Needs review” in Notion. Find them in People → “To review (captured)” and untick the box when done.'));
     for (const e of data.errors || []) nodes.push(el('div', 'err', e));
     if (!nodes.length) nodes.push(el('div', 'muted', 'No contact details could be read. Try a sharper photo, or paste the text.'));
     const again = el('button', '', 'Add another'); again.style.marginTop = '12px';
@@ -271,7 +343,7 @@ a{color:var(--accent)}
       const res = await fetch(cfg().url + '/capture', {
         method: 'POST', signal: c.signal,
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg().tok },
-        body: JSON.stringify({ images, text: $('text').value.trim(), note, today: localDate(), log_meeting: $('meet').checked }),
+        body: JSON.stringify({ images, text: $('text').value.trim(), note, today: localDate(), log_meeting: state.images.length > 0 && $('meet').checked }),
       }).finally(() => clearTimeout(timer));
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -282,7 +354,7 @@ a{color:var(--accent)}
         if ((data.results || []).length) {
           rememberNote(note);
           state.images.forEach((i) => URL.revokeObjectURL(i.url)); state.images = [];
-          $('text').value = ''; $('note').value = ''; $('showText').dataset.open = ''; clearShared();
+          $('text').value = ''; $('showText').dataset.open = ''; clearShared();
         }
       }
     } catch (e) {
@@ -296,10 +368,12 @@ a{color:var(--accent)}
   // ---- start -------------------------------------------------------------------
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   renderRecent();
+  restoreNote();
   if (!configured()) showSetup(true);
   refresh();
   loadShared();
 })();
 </script>
+<script src="card.js"></script>
 </body>
 </html>

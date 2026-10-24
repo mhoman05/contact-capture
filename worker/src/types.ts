@@ -8,6 +8,7 @@ export interface Env {
   NOTION_PEOPLE_DB: string;
   NOTION_COMPANIES_DB: string;
   NOTION_INTERACTIONS_DB: string;
+  NOTION_ME_DB?: string; // "My sharing details" database
   MODEL?: string;
   // Static files of the app (the public/ folder), served by Cloudflare. Absent in unit tests.
   ASSETS?: Fetcher;
@@ -35,13 +36,14 @@ export interface CaptureRequest {
   text: string; // pasted/shared text, e.g. an email signature
   note: string; // where/how the user met the person
   today: string; // YYYY-MM-DD in the user's time zone
-  log_meeting: boolean; // also add an "In person" interaction dated today
+  log_meeting: boolean; // also add an "In person" interaction dated today (photos only)
 }
 
 export interface CaptureResult {
   name: string;
   company: string | null;
   action: 'created' | 'updated' | 'unchanged';
+  needs_review: boolean; // new people are flagged in Notion so they show up in the review view
   page_url: string;
   added: string[]; // CRM fields that were filled in
   interaction_url: string | null;

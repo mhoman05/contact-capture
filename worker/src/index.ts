@@ -1,11 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { runCapture } from './capture';
 import { DEFAULT_MODEL, ExtractionError, extractContacts } from './extract';
+import { readMe, updateMeValue } from './me';
 import { NotionClient, NotionError } from './notion';
 import type { CaptureImage, CaptureRequest, Env } from './types';
 
 const MAX_BODY_BYTES = 12 * 1024 * 1024;
-const MAX_IMAGES = 6;
+const MAX_IMAGES = 12; // a bulk run after a conference
 const MAX_IMAGE_B64 = 6 * 1024 * 1024; // base64 characters per image (the app downsizes to well under this)
 const MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
@@ -68,7 +69,34 @@ export function parseRequest(raw: unknown, fallbackToday: string): CaptureReques
   if (!images.length && !text) return 'Send at least one image or some text.';
   const note = typeof o.note === 'string' ? o.note.trim().slice(0, 500) : '';
   const today = typeof o.today === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.today) ? o.today : fallbackToday;
-  return { images, text, note, today, log_meeting: o.log_meeting !== false };
+  // A meeting is only ever logged for photos, and only when asked for. Text (an email signature) is never a meeting.
+  return { images, text, note, today, log_meeting: images.length > 0 && o.log_meeting === true };
+}
+
+/** The details you may share about yourself (Notion database "My sharing details"). */
+async function handleMe(req: Request, env: Env, path: string, cors: Record<string, string>): Promise<Response> {
+  if (!env.NOTION_ME_DB) return json({ error: 'NOTION_ME_DB is not set.' }, 503, cors);
+  const notion = new NotionClient(env.NOTION_TOKEN);
+  try {
+    if (path === '/me') return json({ items: await readMe(notion, env.NOTION_ME_DB) }, 200, cors);
+    const raw = await req.text();
+    if (raw.length > 10_000) return json({ error: 'Request too large.' }, 413, cors);
+    let body: { id?: unknown; value?: unknown };
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return json({ error: 'Body is not valid JSON.' }, 400, cors);
+    }
+    if (typeof body.id !== 'string' || !/^[0-9a-z-]{6,40}$/i.test(body.id) || typeof body.value !== 'string') {
+      return json({ error: 'Send {"id": "<row id>", "value": "<text>"}.' }, 400, cors);
+    }
+    const item = await updateMeValue(notion, env.NOTION_ME_DB, body.id, body.value.trim().slice(0, 1900));
+    return item ? json({ item }, 200, cors) : json({ error: 'That row is not in My sharing details.' }, 404, cors);
+  } catch (err) {
+    if (err instanceof NotionError) return json({ error: err.message }, err.status, cors);
+    console.error(err);
+    return json({ error: 'Unexpected error.' }, 500, cors);
+  }
 }
 
 export default {
@@ -80,12 +108,14 @@ export default {
     // Android posts shared files here; the app's service worker normally intercepts it. If it is not active yet, just open the app.
     if (url.pathname === '/share-target') return Response.redirect(new URL('/', url).href, 303);
     // Everything else is a static file of the app.
-    if (url.pathname !== '/capture') {
+    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST' };
+    const method = API[url.pathname];
+    if (!method) {
       return env.ASSETS ? env.ASSETS.fetch(req) : json({ error: 'Not found.' }, 404, cors);
     }
 
     if (req.method === 'OPTIONS') return new Response(null, { status: cors['Access-Control-Allow-Origin'] ? 204 : 403, headers: cors });
-    if (req.method !== 'POST') return json({ error: 'Use POST.' }, 405, cors);
+    if (req.method !== method) return json({ error: `Use ${method}.` }, 405, cors);
     if (!isAllowedOrigin(req, env)) return json({ error: 'Origin not allowed.' }, 403);
 
     const auth = req.headers.get('Authorization') ?? '';
@@ -93,6 +123,8 @@ export default {
     if (!env.CAPTURE_TOKEN || !token || !(await secretsMatch(token, env.CAPTURE_TOKEN))) {
       return json({ error: 'Wrong or missing access token.' }, 401, cors);
     }
+
+    if (url.pathname === '/me' || url.pathname === '/me/update') return handleMe(req, env, url.pathname, cors);
 
     const length = Number(req.headers.get('Content-Length') ?? '0');
     if (length > MAX_BODY_BYTES) return json({ error: 'Request too large.' }, 413, cors);

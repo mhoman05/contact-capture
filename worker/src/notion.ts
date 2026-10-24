@@ -16,6 +16,7 @@ export interface NotionPage {
   id: string;
   url: string;
   properties: Record<string, any>;
+  parent?: { type?: string; database_id?: string };
 }
 
 export class NotionClient {
@@ -74,6 +75,10 @@ export class NotionClient {
       cursor = res.has_more && res.next_cursor ? res.next_cursor : undefined;
     } while (cursor && rows.length < max);
     return rows;
+  }
+
+  getPage(pageId: string): Promise<NotionPage> {
+    return this.request<NotionPage>('GET', `/pages/${pageId}`);
   }
 
   createPage(dbId: string, properties: Record<string, unknown>): Promise<NotionPage> {
@@ -189,8 +194,9 @@ export interface UpsertOutcome {
   warnings: string[];
 }
 
-function noteLine(input: PersonInput): string {
-  const bits = [input.note, input.notes].filter(Boolean).join(' · ');
+/** One dated line for the Notes field: what you typed, what the card said, and which fields this capture filled in. */
+function noteLine(input: PersonInput, filled: string[] = []): string {
+  const bits = [input.note, input.notes, filled.length ? `Filled in: ${filled.join(', ')}` : ''].filter(Boolean).join(' · ');
   return bits ? `${input.today}: ${bits}` : '';
 }
 
@@ -208,6 +214,7 @@ export async function createPerson(notion: NotionClient, dbId: string, input: Pe
   if (input.location) set('Location', P.rich(input.location));
   if (input.company) set('Company', P.relation([input.company.id]));
   if (input.note) set('How We Know Each Other', P.rich(input.note));
+  props['Needs review'] = P.checkbox(true); // shows up in the "To review (captured)" view until you untick it
   props.Notes = P.rich([`Added from ${input.source} on ${input.today}.`, input.notes].filter(Boolean).join(' '));
   const page = await notion.createPage(dbId, props);
   return { page, action: 'created', added, warnings: [] };
@@ -272,7 +279,7 @@ export async function updatePerson(
     props['How We Know Each Other'] = P.rich(input.note);
     added.push('How We Know Each Other');
   }
-  const line = noteLine(input);
+  const line = noteLine(input, added);
   if (line) {
     const current = plain(p.Notes).trim();
     if (!current.includes(line)) {

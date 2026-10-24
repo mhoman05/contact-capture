@@ -40,6 +40,7 @@ Rules:
 - Copy only what is visible. Never guess or invent an email address, phone number, surname or job title. Use null for anything not shown.
 - full_name: the person's name as printed, without titles such as Dr. or Mr. Keep accents and spelling exactly.
 - phone: the direct or mobile number if both are shown, otherwise the main number. Keep the international prefix if printed.
+- If a phone number or email address is blurred, cut off or only partly readable, return null for it. Never return a partial or guessed number or address. Say in notes which one could not be read (for example "mobile number not legible").
 - company: the organisation the person works for, without the legal form unless it is part of the brand name.
 - linkedin_url: only a LinkedIn address that is actually printed (or a QR code you can read). Never construct one from the name.
 - notes: one short phrase for anything useful that fits no other field (a second role, a language, a printed tagline). Otherwise null.
@@ -91,7 +92,7 @@ export function parseContacts(raw: unknown): ExtractedContact[] {
       notes: str('notes', 300),
     });
   }
-  return out.slice(0, 10);
+  return out.slice(0, 20);
 }
 
 export async function extractContacts(client: Anthropic, model: string, req: CaptureRequest): Promise<ExtractedContact[]> {
@@ -99,7 +100,7 @@ export async function extractContacts(client: Anthropic, model: string, req: Cap
   try {
     response = await client.beta.messages.create({
       model,
-      max_tokens: 4096,
+      max_tokens: 8192,
       // If a safety classifier ever declines a harmless card, retry on Anthropic's recommended fallback model.
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',

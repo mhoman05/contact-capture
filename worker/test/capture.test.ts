@@ -61,6 +61,9 @@ describe('creating people', () => {
     const company = fake.rows.find((r) => r.db === COMPANIES)!;
     expect(person.properties.Company.relation[0].id).toBe(company.id);
 
+    expect(person.properties['Needs review'].checkbox).toBe(true);
+    expect(results[0].needs_review).toBe(true);
+
     const meeting = fake.rows.find((r) => r.db === INTERACTIONS)!;
     expect(meeting.properties.Type.select.name).toBe('In person');
     expect(meeting.properties.Date.date.start).toBe('2026-10-26');
@@ -106,7 +109,9 @@ describe('matching existing people', () => {
     expect(results[0].added).toEqual(['Phone', 'LinkedIn', 'Role', 'Company', 'Notes']);
     expect(fake.rows.filter((r) => r.db === PEOPLE)).toHaveLength(1);
     expect(existing.properties['How We Know Each Other'].rich_text[0].text.content).toBe('Introduced by Sam');
-    expect(existing.properties.Notes.rich_text[0].text.content).toBe('Old note\n2026-10-26: Met at MERGE Madrid');
+    expect(existing.properties.Notes.rich_text[0].text.content).toBe(
+      'Old note\n2026-10-26: Met at MERGE Madrid · Filled in: Phone, LinkedIn, Role, Company',
+    );
   });
 
   it('never overwrites conflicting values, it warns instead', async () => {
@@ -133,7 +138,8 @@ describe('matching existing people', () => {
       deps([contact({ full_name: 'Benedikt Rutter', email: 'b@bitgo.com', phone: null, job_title: null, company: null, linkedin_url: null })]),
       request({ log_meeting: false, note: '' }),
     );
-    expect(results[0]).toMatchObject({ action: 'updated', added: ['Email'] });
+    expect(results[0]).toMatchObject({ action: 'updated', added: ['Email', 'Notes'] });
+    expect(fake.rows.filter((r) => r.db === PEOPLE)[0].properties.Notes.rich_text[0].text.content).toBe('2026-10-26: Filled in: Email');
     expect(fake.rows.filter((r) => r.db === PEOPLE)).toHaveLength(1);
   });
 
@@ -146,6 +152,15 @@ describe('matching existing people', () => {
     expect(results[0].action).toBe('created');
     expect(results[0].warnings[0]).toContain('Possible duplicate of Álvaro Durán Casares');
     expect(fake.rows.filter((r) => r.db === PEOPLE)).toHaveLength(2);
+  });
+});
+
+describe('review flag', () => {
+  it('does not flag people who already existed', async () => {
+    const existing = fake.seed(PEOPLE, { Name: title('Jane Doe'), Email: { email: 'jane@acme.com' }, Notes: rich('') });
+    const { results } = await runCapture(deps([contact()]), request({ log_meeting: false }));
+    expect(results[0].needs_review).toBe(false);
+    expect(existing.properties['Needs review']).toBeUndefined();
   });
 });
 
@@ -171,7 +186,7 @@ describe('large databases', () => {
       deps([contact({ full_name: 'Zoe Zimmermann', email: 'zoe@z.com', phone: null, job_title: null, company: null, linkedin_url: null })]),
       request({ log_meeting: false, note: '' }),
     );
-    expect(results[0]).toMatchObject({ action: 'updated', added: ['Email'] });
+    expect(results[0]).toMatchObject({ action: 'updated', added: ['Email', 'Notes'] });
     expect(fake.rows.filter((r) => r.db === PEOPLE)).toHaveLength(231);
   });
 });
