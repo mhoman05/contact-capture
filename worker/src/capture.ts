@@ -17,11 +17,15 @@ function sourceLabel(req: CaptureRequest): string {
 
 /** Read the contacts out of the images/text and write them to the CRM. Contacts are handled one by one so a failure on one does not lose the others. */
 export async function runCapture(deps: CaptureDeps, req: CaptureRequest): Promise<{ results: CaptureResult[]; errors: string[] }> {
-  const contacts = await deps.extract(req);
+  const extracted = req.images.length || req.text ? await deps.extract(req) : [];
+  const contacts = [
+    ...extracted.map((contact) => ({ contact, source: sourceLabel(req) })),
+    ...(req.manual ? [req.manual] : []),
+  ];
   const results: CaptureResult[] = [];
   const errors: string[] = [];
 
-  for (const c of contacts) {
+  for (const { contact: c, source } of contacts) {
     try {
       const lookup = await findPerson(deps.notion, deps.peopleDb, c);
       const company = c.company ? await findOrCreateCompany(deps.notion, deps.companiesDb, c.company, c.website) : null;
@@ -31,12 +35,13 @@ export async function runCapture(deps: CaptureDeps, req: CaptureRequest): Promis
         phone: c.phone,
         job_title: c.job_title,
         linkedin_url: c.linkedin_url,
+        telegram_url: c.telegram_url ?? null,
         location: c.location,
         notes: c.notes,
         company,
         note: req.note,
         today: req.today,
-        source: sourceLabel(req),
+        source,
       };
       const outcome = lookup.match
         ? await updatePerson(deps.notion, lookup.match, input)

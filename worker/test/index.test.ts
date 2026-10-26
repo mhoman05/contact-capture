@@ -172,3 +172,28 @@ describe('my sharing details', () => {
     expect((await callMe('/me', { method: 'POST', headers: authed })).status).toBe(405);
   });
 });
+
+describe('typed contacts in the request', () => {
+  const base = { images: [], text: '', note: 'MERGE', today: '2026-10-26' };
+  it('accepts a typed contact on its own and cleans the values', () => {
+    const r = parseRequest({ ...base, contact: { name: ' Jane  Doe ', company: 'Acme', phone: '0034 600 111 222', email: 'Jane@Acme.com', telegram: '@janedoe', linkedin: 'linkedin.com/in/janedoe/?utm=x', source: 'qr' } }, 'x');
+    expect(r).toMatchObject({ manual: { source: 'a scanned QR code', contact: { full_name: 'Jane Doe', email: 'jane@acme.com', phone: '+34 600 111 222', telegram_url: 'https://t.me/janedoe', linkedin_url: 'https://www.linkedin.com/in/janedoe' } } });
+  });
+  it('needs a name, and reports values it cannot read instead of dropping them', () => {
+    expect(parseRequest({ ...base, contact: { company: 'Acme' } }, 'x')).toMatch(/name/);
+    expect(parseRequest({ ...base, contact: { name: 'Jane', email: 'nope', phone: '12' } }, 'x')).toMatch(/email address, phone number/);
+    expect(parseRequest({ ...base, contact: { name: 'Jane', telegram: 't.me/+abcdef' } }, 'x')).toMatch(/Telegram/);
+  });
+  it('keeps LinkedIn short links and rejects other sites', () => {
+    const ok = parseRequest({ ...base, contact: { name: 'Jane', linkedin: 'https://lnkd.in/abc123?trk=x' } }, 'x') as any;
+    expect(ok.manual.contact.linkedin_url).toBe('https://lnkd.in/abc123');
+    expect(parseRequest({ ...base, contact: { name: 'Jane', linkedin: 'https://evil.example/in/jane' } }, 'x')).toMatch(/LinkedIn/);
+  });
+  it('allows a meeting for a typed contact but never for text alone', () => {
+    expect((parseRequest({ ...base, log_meeting: true, contact: { name: 'Jane' } }, 'x') as any).log_meeting).toBe(true);
+    expect((parseRequest({ ...base, text: 'Jane Doe', log_meeting: true }, 'x') as any).log_meeting).toBe(false);
+  });
+  it('still needs something to work with', () => {
+    expect(parseRequest(base, 'x')).toMatch(/at least one/i);
+  });
+});

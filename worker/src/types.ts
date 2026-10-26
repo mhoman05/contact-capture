@@ -24,6 +24,7 @@ export interface ExtractedContact {
   website: string | null;
   location: string | null;
   notes: string | null;
+  telegram_url?: string | null; // only set by typed or scanned contacts
 }
 
 export interface CaptureImage {
@@ -31,12 +32,19 @@ export interface CaptureImage {
   data: string; // base64, no data: prefix
 }
 
+/** A contact typed in (or filled from a scanned QR code) instead of read from a photo. Already validated by parseRequest. */
+export interface ManualContact {
+  contact: ExtractedContact;
+  source: 'typed in' | 'a scanned QR code';
+}
+
 export interface CaptureRequest {
   images: CaptureImage[];
   text: string; // pasted/shared text, e.g. an email signature
   note: string; // where/how the user met the person
   today: string; // YYYY-MM-DD in the user's time zone
-  log_meeting: boolean; // also add an "In person" interaction dated today (photos only)
+  log_meeting: boolean; // also add an "In person" interaction dated today (photos and typed contacts only)
+  manual?: ManualContact;
 }
 
 export interface CaptureResult {

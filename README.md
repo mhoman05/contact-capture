@@ -44,6 +44,12 @@ Changes to the files in `public/` alone do not trigger a deploy; after copying n
 
 - **Meeting someone (at an event or a meeting):** take a photo of the card → *Share* → **Contact capture** → tick *I met them in person* → type where (the note stays for 12 hours, so the next cards need no retyping) → *Add to CRM*. Fill in details in Notion later; the person is under *To review*. In Settings you can switch on "send straight away" so sharing a photo is the only step.
 - **Bulk at home after an event:** leave *I met them in person* unticked, share up to 12 cards at a time, and review them the same day in *To review (captured)*.
+- **No business card:** tap **Type it in** and enter name, company, phone, email (and under *More*: role, LinkedIn, Telegram, website). The note and the *I met them in person* tickbox work the same as for photos. Nothing is sent to Claude, so it costs nothing; the person lands in Notion marked *Needs review*.
+- **Scan a QR code:** tap **Scan a QR code** and point the camera at it, or choose a photo or screenshot of the code. The details fill the same form so you can correct them before sending.
+  - *LinkedIn* QR code: the profile link is saved in the LinkedIn field. LinkedIn does not put the name in the code, so the app guesses it from the address when it can (check it) and otherwise asks you to type it. The person then shows up in *Needs LinkedIn enrichment*.
+  - *Telegram* QR code (a `t.me/username` link): saved in the new **Telegram** field of People. Telegram only shares the username, so type the name. Group invite links are refused.
+  - *Contact card* QR codes (a vCard, for example from another person's QR card app, or this app's own *My QR card*): name, company, role, phone, email and links all fill in.
+  - WhatsApp (`wa.me`) links fill the phone number; other websites fill the website.
 - **Email signature or LinkedIn profile:** share a screenshot (not a photo of a screen) or select the text and share it. If the person is already in the CRM, only their empty fields are filled; no meeting is logged.
 - **Opening the app directly** works too: *Take photo*, *Choose photos* or *Paste text instead*.
 
@@ -87,7 +93,7 @@ The app itself is in GitHub and Cloudflare, and your contacts and details are in
 cd worker
 npm ci
 npm run typecheck
-npm test            # 42 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
+npm test            # 50 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
 ```
 
 Run everything locally with `npx wrangler@4 dev`, putting the three secrets in `worker/.dev.vars` (git-ignored), then open `http://127.0.0.1:8787/`.

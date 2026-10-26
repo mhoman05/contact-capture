@@ -54,6 +54,11 @@ button.icon{padding:0;width:44px}
 .item{padding:6px 0;border-top:1px solid var(--line)}
 .item:first-child{border-top:0}
 #meStatus.bad{color:var(--bad)}
+.scanner{position:fixed;inset:0;background:#000;z-index:20;display:flex;flex-direction:column;color:#fff}
+.scanner video{flex:1;min-height:0;width:100%;object-fit:cover}
+.scanner .bar{padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:#111;display:grid;gap:10px}
+.scanner .bar button,.scanner .bar .btn{background:#2a2f2e;color:#fff;border-color:#444}
+.scanner .frame{position:absolute;left:50%;top:38%;width:62vmin;height:62vmin;transform:translate(-50%,-50%);border:3px solid rgba(255,255,255,.85);border-radius:18px;pointer-events:none;box-shadow:0 0 0 100vmax rgba(0,0,0,.35)}
 .qrbox{background:#fff;border-radius:14px;padding:8px;max-width:340px;margin:0 auto}
 .qrbox canvas{width:100%;height:auto;display:block;image-rendering:pixelated}
 .qrfull{position:fixed;inset:0;background:#fff;z-index:10;display:flex;align-items:center;justify-content:center;padding:16px;color:#000;flex-direction:column;gap:12px}
@@ -106,6 +111,25 @@ a{color:var(--accent)}
     </div>
     <input type="file" id="cam" accept="image/*" capture="environment" hidden>
     <input type="file" id="pick" accept="image/*" multiple hidden>
+    <div class="row" style="margin-top:8px">
+      <button id="scanBtn" type="button">🔳 Scan a QR code</button>
+      <button id="manualBtn" type="button">✍ Type it in</button>
+    </div>
+
+    <div id="manual" class="hidden">
+      <p class="muted" id="scanMsg" role="status" style="margin:12px 0 0"></p>
+      <label for="m-name">Name</label><input type="text" id="m-name" autocomplete="off">
+      <label for="m-company">Company</label><input type="text" id="m-company" autocomplete="off">
+      <label for="m-phone">Phone</label><input type="text" id="m-phone" inputmode="tel" autocomplete="off">
+      <label for="m-email">Email</label><input type="text" id="m-email" inputmode="email" autocomplete="off">
+      <details id="m-more" style="margin-top:8px"><summary style="cursor:pointer;min-height:40px;display:flex;align-items:center;color:var(--mute)">More (role, LinkedIn, Telegram, website)</summary>
+        <label for="m-role">Role</label><input type="text" id="m-role" autocomplete="off">
+        <label for="m-linkedin">LinkedIn link</label><input type="text" id="m-linkedin" inputmode="url" autocomplete="off">
+        <label for="m-telegram">Telegram username or link</label><input type="text" id="m-telegram" autocomplete="off">
+        <label for="m-website">Website</label><input type="text" id="m-website" inputmode="url" autocomplete="off">
+      </details>
+      <button class="chip" id="manualClear" type="button" style="margin-top:10px">Clear</button>
+    </div>
 
     <div id="textWrap" class="hidden">
       <label for="text">Shared text (for example an email signature)</label>
@@ -158,9 +182,22 @@ a{color:var(--accent)}
   </div>
 </main>
 
+<div class="scanner hidden" id="scanner" role="dialog" aria-label="Scan a QR code">
+  <video id="scanVideo" playsinline muted></video>
+  <div class="frame"></div>
+  <div class="bar">
+    <div id="scanLive" role="status" style="font-size:15px;text-align:center"></div>
+    <label class="btn" for="scanFile">🖼 Use a photo or screenshot of the code</label>
+    <input type="file" id="scanFile" accept="image/*" hidden>
+    <button id="scanCancel" type="button">Cancel</button>
+  </div>
+</div>
+
 <div class="qrfull hidden" id="qrFull" role="dialog" aria-label="QR code, tap to close"><img id="qrFullImg" alt="QR code"><div style="font-size:15px">Tap anywhere to close</div></div>
 
 <script src="qrcode.js"></script>
+<script src="jsqr.js"></script>
+<script src="scan.js"></script>
 <script>
 (() => {
   'use strict';
@@ -233,8 +270,9 @@ a{color:var(--accent)}
     const hasText = $('text').value.trim().length > 0;
     $('textWrap').classList.toggle('hidden', !hasText && $('showText').dataset.open !== '1');
     $('showText').classList.toggle('hidden', !$('textWrap').classList.contains('hidden'));
-    $('meetWrap').classList.toggle('hidden', state.images.length === 0); // a signature is never a meeting
-    $('send').disabled = state.busy || !(state.images.length || hasText) || !configured();
+    const hasContact = $('m-name').value.trim().length > 0;
+    $('meetWrap').classList.toggle('hidden', !(state.images.length || hasContact)); // pasted text (a signature) is never a meeting
+    $('send').disabled = state.busy || !(state.images.length || hasText || hasContact) || !configured();
     $('send').textContent = !configured() ? 'Connect the service first (⚙)' : 'Add to CRM';
   }
   for (const id of ['cam', 'pick']) {
@@ -330,6 +368,36 @@ a{color:var(--accent)}
     showResult(nodes);
   }
 
+  // ---- typed / scanned contact ----------------------------------------------------
+  const MF = ['name', 'company', 'phone', 'email', 'role', 'linkedin', 'telegram', 'website'];
+  let fromQR = false;
+  const manualContact = () => {
+    const c = {}; for (const k of MF) c[k] = $('m-' + k).value.trim();
+    return c.name ? { ...c, source: fromQR ? 'qr' : 'typed' } : null;
+  };
+  function showManual(open) { $('manual').classList.toggle('hidden', !open); if (open) $('m-name').focus(); refresh(); }
+  function clearManual() { for (const k of MF) $('m-' + k).value = ''; fromQR = false; $('scanMsg').textContent = ''; $('manual').classList.add('hidden'); $('m-more').open = false; }
+  $('manualBtn').onclick = () => showManual($('manual').classList.contains('hidden'));
+  $('manualClear').onclick = () => { clearManual(); refresh(); };
+  for (const k of MF) $('m-' + k).addEventListener('input', refresh);
+
+  $('scanBtn').onclick = async () => {
+    const text = await CCScan.scanCamera({ root: $('scanner'), video: $('scanVideo'), cancel: $('scanCancel'), fromFile: $('scanFile'), msg: $('scanLive') });
+    if (text == null) return;
+    const r = CCScan.parse(text);
+    $('manual').classList.remove('hidden');
+    if (!r || r.reject) {
+      $('scanMsg').textContent = r ? r.hint : 'That QR code does not contain contact details' + (text.length < 80 ? ': ' + text : '.');
+      refresh(); return;
+    }
+    for (const k of MF) if (r.fields[k]) $('m-' + k).value = r.fields[k];
+    fromQR = true;
+    if (r.fields.role || r.fields.linkedin || r.fields.telegram || r.fields.website) $('m-more').open = true;
+    $('scanMsg').textContent = 'Scanned ' + r.label + '. ' + r.hint;
+    refresh();
+    (r.fields.name ? $('m-company') : $('m-name')).focus();
+  };
+
   $('send').onclick = async () => {
     if (state.busy) return;
     state.busy = true;
@@ -343,7 +411,7 @@ a{color:var(--accent)}
       const res = await fetch(cfg().url + '/capture', {
         method: 'POST', signal: c.signal,
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg().tok },
-        body: JSON.stringify({ images, text: $('text').value.trim(), note, today: localDate(), log_meeting: state.images.length > 0 && $('meet').checked }),
+        body: JSON.stringify({ images, text: $('text').value.trim(), note, today: localDate(), contact: manualContact(), log_meeting: (state.images.length > 0 || !!manualContact()) && $('meet').checked }),
       }).finally(() => clearTimeout(timer));
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -354,7 +422,7 @@ a{color:var(--accent)}
         if ((data.results || []).length) {
           rememberNote(note);
           state.images.forEach((i) => URL.revokeObjectURL(i.url)); state.images = [];
-          $('text').value = ''; $('showText').dataset.open = ''; clearShared();
+          $('text').value = ''; $('showText').dataset.open = ''; clearShared(); clearManual();
         }
       }
     } catch (e) {

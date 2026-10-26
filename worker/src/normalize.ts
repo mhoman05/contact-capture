@@ -100,3 +100,38 @@ export function nonEmpty(s: string | null | undefined, max = 200): string | null
   const v = (s ?? '').replace(/\s+/g, ' ').trim();
   return v ? truncate(v, max) : null;
 }
+
+/** A Telegram profile as https://t.me/<username>. Accepts t.me / telegram.me links, tg://resolve?domain=, or @username. Group invite links are not profiles. */
+export function cleanTelegram(s: string | null | undefined): string | null {
+  const v = (s ?? '').trim();
+  if (!v) return null;
+  let name: string | undefined;
+  const at = v.match(/^@([A-Za-z][A-Za-z0-9_]{4,31})$/);
+  if (at) name = at[1];
+  const tg = v.match(/^tg:\/\/resolve\?(?:[^#]*&)?domain=([A-Za-z][A-Za-z0-9_]{4,31})(?:&|$)/i);
+  if (!name && tg) name = tg[1];
+  const web = v.match(/^(?:https?:\/\/)?(?:www\.)?(?:t|telegram)\.me\/([A-Za-z][A-Za-z0-9_]{4,31})\/?(?:[?#].*)?$/i);
+  if (!name && web) name = web[1];
+  return name ? `https://t.me/${name}` : null;
+}
+
+export function telegramHandle(url: string | null | undefined): string | null {
+  return url?.match(/t\.me\/([A-Za-z0-9_]+)/i)?.[1].toLowerCase() ?? null;
+}
+
+/** A LinkedIn profile address. A normal /in/ link becomes the canonical profile address; other links on linkedin.com or lnkd.in (short links from the app's QR code) are kept as they are, without tracking parameters. */
+export function cleanLinkedInLink(s: string | null | undefined): string | null {
+  const canonical = cleanLinkedIn(s);
+  if (canonical) return canonical;
+  const v = (s ?? '').trim();
+  if (!v || /\s/.test(v)) return null;
+  try {
+    const u = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`);
+    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+    if (host === 'lnkd.in' || host === 'linkedin.com' || host.endsWith('.linkedin.com')) return `https://${u.hostname}${u.pathname}`;
+  } catch {
+    /* not a URL */
+  }
+  return null;
+}

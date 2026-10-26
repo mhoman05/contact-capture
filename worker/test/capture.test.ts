@@ -247,3 +247,39 @@ describe('parseContacts', () => {
     expect(() => parseContacts(null)).toThrow();
   });
 });
+
+describe('typed and scanned contacts', () => {
+  const typed = (over: Partial<ExtractedContact> = {}, src: 'typed in' | 'a scanned QR code' = 'typed in'): CaptureRequest =>
+    request({ images: [], text: '', manual: { contact: contact({ linkedin_url: null, ...over }), source: src } });
+  const noExtract = (): CaptureDeps => ({
+    ...deps([]),
+    extract: async () => {
+      throw new Error('the model must not be called for a typed contact');
+    },
+  });
+
+  it('files a typed contact without calling the model, flagged for review, with the meeting only when asked', async () => {
+    const { results, errors } = await runCapture(noExtract(), typed({}, 'typed in'));
+    expect(errors).toEqual([]);
+    expect(results[0]).toMatchObject({ name: 'Jane Doe', action: 'created', needs_review: true });
+    const person = fake.rows.find((r) => r.db === PEOPLE)!;
+    expect(person.properties.Notes.rich_text[0].text.content).toContain('Added from typed in');
+    expect(fake.rows.filter((r) => r.db === INTERACTIONS)).toHaveLength(1);
+    const again = await runCapture(noExtract(), { ...typed({ email: 'jane@acme.com' }), log_meeting: false });
+    expect(again.results[0].action).not.toBe('created');
+  });
+
+  it('stores a Telegram profile and matches an existing person by it', async () => {
+    const existing = fake.seed(PEOPLE, { Name: title('Someone Else'), Telegram: { url: 'https://t.me/janedoe' } });
+    const res = await runCapture(noExtract(), { ...typed({ full_name: 'J. D.', email: null, phone: null, company: null, telegram_url: 'https://t.me/janedoe', job_title: null }), log_meeting: false });
+    expect(res.results[0].page_url).toContain(existing.id);
+    expect(fake.rows.filter((r) => r.db === PEOPLE)).toHaveLength(1);
+  });
+
+  it('adds Telegram to a new person', async () => {
+    await runCapture(noExtract(), typed({ telegram_url: 'https://t.me/janedoe' }, 'a scanned QR code'));
+    const p = fake.rows.find((r) => r.db === PEOPLE)!;
+    expect(p.properties.Telegram.url).toBe('https://t.me/janedoe');
+    expect(p.properties.Notes.rich_text[0].text.content).toContain('a scanned QR code');
+  });
+});

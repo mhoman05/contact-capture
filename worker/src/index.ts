@@ -3,7 +3,8 @@ import { runCapture } from './capture';
 import { DEFAULT_MODEL, ExtractionError, extractContacts } from './extract';
 import { readMe, updateMeValue } from './me';
 import { NotionClient, NotionError } from './notion';
-import type { CaptureImage, CaptureRequest, Env } from './types';
+import { cleanEmail, cleanLinkedInLink, cleanPhone, cleanTelegram, cleanWebsite, nonEmpty } from './normalize';
+import type { CaptureImage, CaptureRequest, Env, ManualContact } from './types';
 
 const MAX_BODY_BYTES = 12 * 1024 * 1024;
 const MAX_IMAGES = 12; // a bulk run after a conference
@@ -51,6 +52,44 @@ async function secretsMatch(a: string, b: string): Promise<boolean> {
   return diff === 0;
 }
 
+/** The typed-in contact. Values that are given but unreadable are reported back instead of silently dropped. */
+export function parseManual(raw: unknown): ManualContact | string | null {
+  if (raw == null) return null;
+  if (typeof raw !== 'object') return 'contact must be an object.';
+  const o = raw as Record<string, unknown>;
+  const get = (k: string, max: number) => (typeof o[k] === 'string' ? nonEmpty(o[k] as string, max) : null);
+  const name = get('name', 120);
+  if (!name) return 'Type at least a name.';
+  const bad: string[] = [];
+  const checked = <T>(label: string, input: string | null, clean: (s: string) => T | null): T | null => {
+    if (!input) return null;
+    const v = clean(input);
+    if (v == null) bad.push(label);
+    return v;
+  };
+  const email = checked('email address', get('email', 200), cleanEmail);
+  const phone = checked('phone number', get('phone', 60), cleanPhone);
+  const linkedin_url = checked('LinkedIn link', get('linkedin', 300), cleanLinkedInLink);
+  const telegram_url = checked('Telegram username', get('telegram', 100), cleanTelegram);
+  const website = checked('website', get('website', 200), cleanWebsite);
+  if (bad.length) return `Check the ${bad.join(', ')}: it could not be read.`;
+  return {
+    source: o.source === 'qr' ? 'a scanned QR code' : 'typed in',
+    contact: {
+      full_name: name,
+      email,
+      phone,
+      job_title: get('role', 150),
+      company: get('company', 120),
+      linkedin_url,
+      website,
+      location: null,
+      notes: null,
+      telegram_url,
+    },
+  };
+}
+
 export function parseRequest(raw: unknown, fallbackToday: string): CaptureRequest | string {
   if (!raw || typeof raw !== 'object') return 'Body must be a JSON object.';
   const o = raw as Record<string, unknown>;
@@ -66,11 +105,15 @@ export function parseRequest(raw: unknown, fallbackToday: string): CaptureReques
     images.push({ media_type: i.media_type as CaptureImage['media_type'], data: i.data });
   }
   const text = typeof o.text === 'string' ? o.text.trim().slice(0, 8000) : '';
-  if (!images.length && !text) return 'Send at least one image or some text.';
+  const manual = parseManual(o.contact);
+  if (typeof manual === 'string') return manual;
+  if (!images.length && !text && !manual) return 'Send at least one image, some text or a contact.';
   const note = typeof o.note === 'string' ? o.note.trim().slice(0, 500) : '';
   const today = typeof o.today === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.today) ? o.today : fallbackToday;
-  // A meeting is only ever logged for photos, and only when asked for. Text (an email signature) is never a meeting.
-  return { images, text, note, today, log_meeting: images.length > 0 && o.log_meeting === true };
+  // A meeting is only ever logged for photos or a typed contact (someone you are meeting), and only when asked for.
+  // Text (an email signature) is never a meeting.
+  const log_meeting = (images.length > 0 || !!manual) && o.log_meeting === true;
+  return { images, text, note, today, log_meeting, ...(manual ? { manual } : {}) };
 }
 
 /** The details you may share about yourself (Notion database "My sharing details"). */

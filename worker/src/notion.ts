@@ -1,4 +1,4 @@
-import { companyKey, fold, linkedInSlug, nameTokens, phoneDigits, sameName, similarName, truncate } from './normalize';
+import { companyKey, fold, linkedInSlug, telegramHandle, nameTokens, phoneDigits, sameName, similarName, truncate } from './normalize';
 
 const NOTION_VERSION = '2022-06-28';
 
@@ -118,14 +118,14 @@ export function pageTitle(page: NotionPage, titleProp: string): string {
 
 export interface PersonLookup {
   match: NotionPage | null;
-  matchedBy: 'email' | 'linkedin' | 'name' | null;
+  matchedBy: 'email' | 'linkedin' | 'telegram' | 'name' | null;
   similar: NotionPage[]; // possible duplicates, never merged automatically
 }
 
 export async function findPerson(
   notion: NotionClient,
   dbId: string,
-  c: { full_name: string; email: string | null; linkedin_url: string | null },
+  c: { full_name: string; email: string | null; linkedin_url: string | null; telegram_url?: string | null },
 ): Promise<PersonLookup> {
   if (c.email) {
     const hit = await notion.query(dbId, { property: 'Email', email: { equals: c.email } }, 1);
@@ -136,6 +136,12 @@ export async function findPerson(
     const hits = await notion.query(dbId, { property: 'LinkedIn', url: { contains: slug } }, 5);
     const exact = hits.find((h) => linkedInSlug(h.properties.LinkedIn?.url) === slug);
     if (exact) return { match: exact, matchedBy: 'linkedin', similar: [] };
+  }
+  const handle = telegramHandle(c.telegram_url);
+  if (handle) {
+    const hits = await notion.query(dbId, { property: 'Telegram', url: { contains: handle } }, 5);
+    const exact = hits.find((h) => telegramHandle(h.properties.Telegram?.url) === handle);
+    if (exact) return { match: exact, matchedBy: 'telegram', similar: [] };
   }
   if (nameTokens(c.full_name).length === 0) return { match: null, matchedBy: null, similar: [] };
   const candidates = await notion.queryAll(dbId);
@@ -179,6 +185,7 @@ export interface PersonInput {
   phone: string | null;
   job_title: string | null;
   linkedin_url: string | null;
+  telegram_url?: string | null;
   location: string | null;
   notes: string | null;
   company: CompanyRef | null;
@@ -210,6 +217,7 @@ export async function createPerson(notion: NotionClient, dbId: string, input: Pe
   if (input.email) set('Email', P.email(input.email));
   if (input.phone) set('Phone', P.phone(input.phone));
   if (input.linkedin_url) set('LinkedIn', P.url(input.linkedin_url));
+  if (input.telegram_url) set('Telegram', P.url(input.telegram_url));
   if (input.job_title) set('Role', P.rich(input.job_title));
   if (input.location) set('Location', P.rich(input.location));
   if (input.company) set('Company', P.relation([input.company.id]));
@@ -254,6 +262,10 @@ export async function updatePerson(
   if (input.linkedin_url && empty(p.LinkedIn, 'url')) {
     props.LinkedIn = P.url(input.linkedin_url);
     added.push('LinkedIn');
+  }
+  if (input.telegram_url && empty(p.Telegram, 'url')) {
+    props.Telegram = P.url(input.telegram_url);
+    added.push('Telegram');
   }
   if (input.job_title) {
     if (empty(p.Role, 'rich_text')) {
