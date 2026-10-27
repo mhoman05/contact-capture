@@ -34,7 +34,10 @@ export function checkVcard(text: string): { vcard: string; filename: string } | 
   }
   if (!fn) return 'The contact card has no name.';
   const base = fn.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'contact';
-  return { vcard: lines.join('\r\n') + '\r\n', filename: `${base.slice(0, 60)}.vcf` };
+  // Apple's Contacts stops reading a card at a comma-joined parameter such as TYPE=HOME,INTERNET (cards made by older versions
+  // of the app have them), so every type is written as its own parameter: TYPE=HOME;TYPE=INTERNET.
+  const fixed = lines.map((l) => l.replace(/^((?:item\d+\.)?[A-Za-z-]+)((?:;[A-Za-z0-9=,_-]+)*):/, (_m, name: string, params: string) => `${name}${params.replace(/;TYPE=([A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)+)/gi, (_t: string, v: string) => v.split(',').map((x) => `;TYPE=${x}`).join(''))}:`));
+  return { vcard: fixed.join('\r\n') + '\r\n', filename: `${base.slice(0, 60)}.vcf` };
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -87,8 +90,8 @@ body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px}h1{font-size:24px;margin:0}.sub{color:var(--mute);margin:2px 0 14px}.r{display:flex;gap:12px;padding:9px 0;border-top:1px solid var(--line)}.r span{flex:none;width:5.5em;color:var(--mute)}.r a{color:var(--accent);overflow-wrap:anywhere}
 .btn{display:block;text-align:center;margin-top:18px;padding:15px;border-radius:12px;background:var(--accent);color:#fff;font-weight:700;text-decoration:none;font-size:17px}.hint{color:var(--mute);font-size:14px;margin-top:12px}</style></head>
 <body><main><div class="card"><h1>${esc(c.name)}</h1><div class="sub">${esc([c.title, c.org].filter(Boolean).join(' · '))}</div>${rows}
-<a class="btn" href="${esc(fileHref)}">Add to contacts</a>
-<p class="hint">Tap the button, then open the downloaded contact file; your phone offers to save it to your contacts. If nothing opens, find the file in your Downloads and tap it.</p></div></main></body></html>`;
+<a class="btn" href="${esc(fileHref)}">Download contact file</a>
+<p class="hint">This downloads a small contact file (.vcf). On Android, tap the downloaded file and choose <b>Contacts</b>; on iPhone it opens straight away. The details above are tap-to-call and tap-to-email, so you can also add them by hand.</p></div></main></body></html>`;
 }
 
 /** GET /v?c=<base64url vCard>: a page with an "Add to contacts" button; with &f=1 the contact file itself. Public on purpose. */

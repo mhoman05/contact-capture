@@ -13,7 +13,10 @@
   const read = (k, d) => { try { return JSON.parse(store.get(k, 'null')) ?? d; } catch { return d; } };
   const cfg = () => ({ url: (store.get('cc.url') || location.origin).replace(/\/+$/, ''), tok: store.get('cc.tok') });
 
-  let items = read('cc.me.items', []);        // rows of "My sharing details"
+  // A row added by hand in Notion may have no Type. Guess it from the value (an email, a link, a phone number) so it is not silently left out.
+  const guessType = (v) => (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v) ? 'Email' : /^(https?:\/\/|www\.)\S+$/i.test(v) ? 'Website' : /^\+?[\d\s().-]{7,}$/.test(v) ? 'Phone' : '');
+  const fix = (list) => list.map((i) => (i.type || !i.value ? i : { ...i, type: guessType(i.value), guessed: true }));
+  let items = fix(read('cc.me.items', []));   // rows of "My sharing details"
   let groupsOn = read('cc.me.groups', null);  // {groupName: bool}: which groups are ticked right now
   let over = read('cc.me.over', {});          // {rowId: bool}: single details ticked or unticked by hand
   let editing = false;
@@ -56,13 +59,17 @@
       const personal = i.groups.length > 0 && i.groups.every((g) => ci(g) === 'personal');
       // A detail from a second organisation carries that organisation's name as its label, so it does not look like a second work number.
       const org = i.groups.map((g) => companies.find((c) => c.groups.includes(g))).find(Boolean);
-      const label = i.label || (org && org !== main ? org.value : '');
+      // Links carry a label (LinkedIn, Website …) so Apple and Google contacts show what each one is instead of an anonymous link.
+      const label = i.label || (org && org !== main ? org.value : '') || (i.type === 'Website' ? i.detail : '');
+      // Several types are written as separate parameters (TYPE=INTERNET;TYPE=HOME), the way Apple's own contact files do it.
+      // A comma-joined list (TYPE=HOME,INTERNET) made macOS Contacts stop reading the card at that line.
+      const params = (types) => (types ? types.split(',').map((t) => ';TYPE=' + t).join('') : '');
       const add = (prop, types, value) => {
-        if (label) { const g = `item${++n}`; L.push(`${g}.${prop}${types ? ';TYPE=' + types : ''}:${value}`, `${g}.X-ABLabel:${esc(label)}`); }
-        else L.push(`${prop}${types ? ';TYPE=' + types : ''}:${value}`);
+        if (label) { const g = `item${++n}`; L.push(`${g}.${prop}${params(types)}:${value}`, `${g}.X-ABLabel:${esc(label)}`); }
+        else L.push(`${prop}${params(types)}:${value}`);
       };
       if (i.type === 'Phone') add('TEL', personal ? 'CELL' : 'WORK,VOICE', esc(i.value));
-      if (i.type === 'Email') add('EMAIL', personal ? 'HOME,INTERNET' : 'WORK,INTERNET', esc(i.value));
+      if (i.type === 'Email') add('EMAIL', personal ? 'INTERNET,HOME' : 'INTERNET,WORK', esc(i.value));
       if (i.type === 'Website') add('URL', '', url(i.value).replace(/[\r\n]/g, ''));
       if (i.type === 'Address') add('ADR', personal ? 'HOME' : 'WORK', `;;${esc(i.value)};;;;`);
     }
@@ -117,6 +124,7 @@
         const cb = el('input'); cb.type = 'checkbox'; cb.checked = included(i);
         cb.onchange = () => { over[i.id] = cb.checked; persist(); render(); };
         const t = el('span'); t.append(el('span', 'muted', i.detail + ': '), document.createTextNode(i.value));
+        if (!i.type) t.append(el('div', 'err', 'Not shared: set a Type for this row in Notion (Phone, Email, Website, Address …).'));
         lab.append(cb, t); row.append(lab);
       }
       box.append(row);
@@ -137,6 +145,7 @@
     let modules = 0;
     try { modules = drawQR($('qrCanvas'), vcard); } catch { $('qrNeedName').textContent = 'Too much to fit in one QR code. Untick a group or some details.'; $('qrNeedName').classList.remove('hidden'); $('qrBox').classList.add('hidden'); $('qrActions').classList.add('hidden'); return; }
     const count = items.filter((i) => i.value && included(i) && !NAME.has(i.type)).length;
+    $('qrFileText').textContent = vcard.replace(/\r\n/g, '\n');
     $('qrSummary').textContent = `Sharing ${[val('First name'), val('Last name')].filter(Boolean).join(' ')} and ${count} detail${count === 1 ? '' : 's'}`;
     $('qrDense').classList.toggle('hidden', modules <= 85); // above about 85 modules a screen at low brightness gets hard to scan
   }
@@ -156,7 +165,7 @@
     setStatus('Loading from Notion…');
     try {
       const data = await api('/me');
-      items = data.items;
+      items = fix(data.items);
       store.set('cc.me.items', JSON.stringify(items)); store.set('cc.me.at', String(Date.now()));
       over = Object.fromEntries(Object.entries(over).filter(([id]) => items.some((i) => i.id === id)));
       setStatus('Loaded from Notion ' + ago());
@@ -194,7 +203,10 @@
     const link = cfg().url + '/v?c=' + b64url(vcard);
     const name = [val('First name'), val('Last name')].filter(Boolean).join(' ');
     try {
-      if (navigator.share) { await navigator.share({ title: name, text: name + ': tap to save my contact details', url: link }); $('shareMsg').textContent = ''; return; }
+      const on = items.filter((i) => i.value && i.type && included(i) && !NAME.has(i.type) && i.type !== 'Role');
+      const org = on.find((i) => i.type === 'Company'), role = on.find((i) => i.type === 'Role' && org && i.groups.some((g) => org.groups.includes(g)));
+      const text = [name, [role && role.value, org && org.value].filter(Boolean).join(', ')].concat(on.filter((i) => i.type !== 'Company').map((i) => i.value)).filter(Boolean).join('\n') + '\n\nTap to save my contact:';
+      if (navigator.share) { await navigator.share({ title: name, text, url: link }); $('shareMsg').textContent = ''; return; }
     } catch (e) { if (e && e.name === 'AbortError') return; }
     try { await navigator.clipboard.writeText(link); $('shareMsg').textContent = 'Link copied. Paste it into a message.'; }
     catch { window.prompt('Copy this link and send it:', link); }

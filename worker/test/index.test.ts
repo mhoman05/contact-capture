@@ -500,7 +500,16 @@ describe('share link for the contact card', () => {
     expect(html).toContain('mailto:a@acme.com');
     expect(html).toContain('Indoor Golf'); // the club label
     expect(html).toContain(`href="/v?c=${b64(card)}&amp;f=1"`);
-    expect(html).toContain('Add to contacts');
+    expect(html).toContain('Download contact file');
+  });
+  it('rewrites comma-joined TYPE lists, so cards from older versions open fully in Apple Contacts', async () => {
+    const old = 'BEGIN:VCARD\r\nVERSION:3.0\r\nN:Homan;Matthias;;;\r\nFN:Matthias Homan\r\nTEL;TYPE=CELL:+44 770 339 72 64\r\nEMAIL;TYPE=HOME,INTERNET:matthias.homan@gmail.com\r\nADR;TYPE=HOME:;;Calle de Fernandez de la Hoz 35\\, 2D;;;;\r\nURL:https://www.linkedin.com/in/matthias-homan\r\nEND:VCARD\r\n';
+    const body = await (await call(`/v?c=${b64(old)}&f=1`)).text();
+    expect(body).toContain('EMAIL;TYPE=HOME;TYPE=INTERNET:matthias.homan@gmail.com');
+    expect(body).not.toMatch(/TYPE=[A-Za-z]+,/);
+    expect(body).toContain('TEL;TYPE=CELL:+44 770 339 72 64');
+    expect(body).toContain('URL:https://www.linkedin.com/in/matthias-homan');
+    expect(body).toContain('ADR;TYPE=HOME:;;Calle de Fernandez de la Hoz 35\\, 2D;;;;');
   });
   it('escapes everything it shows', async () => {
     const evil = card.replace('FN:Álvaro Durán', 'FN:<img src=x onerror=alert(1)>').replace('NOTE:Founder\\, Indoor Golf', 'NOTE:<script>alert(1)</script>');
