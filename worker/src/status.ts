@@ -8,8 +8,14 @@ export interface DbCheck {
   error: string;
 }
 
+export interface NotionStatus {
+  databases: DbCheck[];
+  connection: { name: string; workspace: string } | null; // which Notion connection the app uses
+  visible: { title: string; id: string }[]; // every database that connection can see
+}
+
 /** Can the app's Notion connection see each database it needs? One call per database, nothing is read from them. */
-export async function checkNotion(notion: NotionClient, env: Env): Promise<DbCheck[]> {
+export async function checkNotion(notion: NotionClient, env: Env): Promise<NotionStatus> {
   const dbs: [string, string | undefined][] = [
     ['People', env.NOTION_PEOPLE_DB],
     ['Companies', env.NOTION_COMPANIES_DB],
@@ -19,7 +25,7 @@ export async function checkNotion(notion: NotionClient, env: Env): Promise<DbChe
     ['My sharing details', env.NOTION_ME_DB],
     ['Tasks', env.NOTION_TASKS_DB],
   ];
-  return Promise.all(
+  const databases = await Promise.all(
     dbs
       .filter(([, id]) => !!id)
       .map(async ([name, id]): Promise<DbCheck> => {
@@ -31,4 +37,7 @@ export async function checkNotion(notion: NotionClient, env: Env): Promise<DbChe
         }
       }),
   );
+  const connection = await notion.getMe().then((m) => ({ name: m.name ?? '', workspace: m.bot?.workspace_name ?? '' })).catch(() => null);
+  const visible = await notion.visibleDatabases().catch(() => []);
+  return { databases, connection, visible };
 }

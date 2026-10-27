@@ -347,14 +347,22 @@
   $('chk').onclick = async () => {
     const out = $('chkOut'); out.replaceChildren(el('div', 'muted', 'Checking…'));
     try {
-      const { databases } = await api('/status');
+      const { databases, connection, visible } = await api('/status');
       out.replaceChildren();
+      const name = connection && connection.name ? '“' + connection.name + '”' : 'the app’s connection';
+      out.append(el('p', 'muted', connection ? 'The app uses the Notion connection ' + name + (connection.workspace ? ' (workspace ' + connection.workspace + ')' : '') + '.' : 'Could not read which Notion connection the app uses.'));
       for (const d of databases) {
         const r = el('div', d.ok ? 'muted' : 'err'); r.style.margin = '4px 0';
         r.textContent = (d.ok ? '✓ ' : '✗ ') + d.name + (d.ok ? (d.title ? ' (' + d.title + ')' : '') : ': ' + d.error);
         out.append(r);
       }
-      if (databases.some((d) => !d.ok)) out.append(el('p', 'muted', 'To fix a ✗: in Notion open that database (or its parent page), tap the ••• menu, choose Connections and add this app’s connection. Then check again.'));
+      if (databases.some((d) => !d.ok)) {
+        out.append(el('p', 'muted', 'To fix a ✗: in Notion open that database (or its parent page), tap the ••• menu, choose Connections and add exactly ' + name + '. A different connection (for example Claude’s) does not help the app. Then check again.'));
+      }
+      const det = el('details'); det.append(el('summary', 'muted', 'Databases this connection can see (' + (visible || []).length + ')'));
+      for (const v of visible || []) det.append(el('div', 'muted', '• ' + v.title + '  (' + v.id.replace(/-/g, '').slice(0, 8) + '…)'));
+      if (!(visible || []).length) det.append(el('div', 'muted', 'None. The connection has not been added to any page yet.'));
+      out.append(det);
     } catch (e) { out.replaceChildren(el('div', 'err', e.message)); }
   };
 

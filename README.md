@@ -1,5 +1,7 @@
 # Pocket CRM
 
+**The app lives here: https://contact-capture.matthias-homan.workers.dev/** (open it in Chrome on the phone; Chrome menu → *Install app*; the first time open it as `https://contact-capture.matthias-homan.workers.dev/#t=<your access token>` so the phone learns the token). The address `https://mhoman05.github.io/contact-capture/` is only the old GitHub Pages page that shows this README; it is not the app.
+
 (The repository and the Worker are still called `contact-capture`; only the name you see changed.)
 
 Share a business card photo, a screenshot of an email signature or a LinkedIn profile, or just selected text, from your Android phone. Claude reads the details and files the person in your Notion Work CRM.
@@ -8,7 +10,7 @@ Share a business card photo, a screenshot of an email signature or a LinkedIn pr
 Android share sheet → this app → Cloudflare Worker → Claude (reads the image) → Notion People / Companies / Interactions
 ```
 
-One Cloudflare Worker does everything: it serves the app (the `public/` folder) and it runs the API (`worker/`). The app and the API share one address, like `https://contact-capture.<your-name>.workers.dev`, so there is no GitHub Pages, no cross-site setup, and no clash with other apps on your phone. Cloudflare's free plan is enough.
+One Cloudflare Worker does everything: it serves the app (the `public/` folder) and it runs the API (`worker/`). The app and the API share one address, like `https://contact-capture.matthias-homan.workers.dev`, so there is no GitHub Pages, no cross-site setup, and no clash with other apps on your phone. Cloudflare's free plan is enough.
 
 ## What it does with each contact
 
@@ -35,7 +37,7 @@ Five secrets go in the repository's **Settings → Secrets and variables → Act
 
 Then:
 
-1. Push to `main`. The workflow **Deploy worker** runs the tests and deploys. Open the finished run → **deploy** → the step *Run cloudflare/wrangler-action*; its log ends with the address, like `https://contact-capture.<your-name>.workers.dev`. (If it asks for a `workers.dev` subdomain, open *Workers & Pages* in the Cloudflare dashboard once to create it, then re-run.)
+1. Push to `main`. The workflow **Deploy worker** runs the tests and deploys. Open the finished run → **deploy** → the step *Run cloudflare/wrangler-action*; its log ends with the address, like `https://contact-capture.matthias-homan.workers.dev`. (If it asks for a `workers.dev` subdomain, open *Workers & Pages* in the Cloudflare dashboard once to create it, then re-run.)
 2. Check it answers: open `<that address>/health` in a browser. You should see `{"ok":true}`.
 3. On the Android phone, open `<that address>/#t=<CAPTURE_TOKEN>` in Chrome. The token is saved on the phone and removed from the address bar.
 4. Chrome menu → **Install app**, then open the installed app once so it can receive shares.
@@ -89,7 +91,7 @@ The **Tasks** tab is your Notion *Task Database*. Two lists plus follow-ups:
 
 ### Connecting Notion to the Task Database (one-time)
 
-Your Task Database lives under a different Notion page ("DATABASES") than the CRM, so the app's Notion connection may not see it yet. In the app open **⚙ → Check Notion connections**: it lists every database the app needs with ✓ or ✗. For each ✗: in Notion open that database (or its parent page), tap **•••** at the top right, choose **Connections** and add the app's connection (the same one you created for the CRM), then check again. The Meetings database (shown in a person's history) may need the same.
+Your Task Database lives under a different Notion page ("DATABASES") than the CRM, so the app's Notion connection may not see it yet. In the app open **⚙ → Check Notion connections**: it names the Notion connection the app uses, lists every database the app needs with ✓ or ✗, and lists every database that connection can see. For each ✗: in Notion open that database (or its parent page), tap **•••** at the top right, choose **Connections** and add the app's connection (the same one you created for the CRM), then check again. The Meetings database (shown in a person's history) may need the same.
 
 ## Companies (inside the People tab)
 
@@ -127,7 +129,7 @@ The Worker reads and edits that one database only (`NOTION_ME_DB` in `worker/wra
 
 Nothing is stored only on the phone except the access token and your "send straight away" choice.
 
-1. Install the app: open the Worker address (`https://contact-capture.<your-name>.workers.dev`) in Chrome, then menu → **Install app**.
+1. Install the app: open the Worker address (`https://contact-capture.matthias-homan.workers.dev`) in Chrome, then menu → **Install app**.
 2. Open `<that address>/#t=<your CAPTURE_TOKEN>` once. The token is saved on the phone and removed from the address bar. (Keep the token in a password manager. It is also in GitHub: repository → Settings → Secrets, though secrets can be replaced but not read; to get a new one, change `CAPTURE_TOKEN` there and re-run the deploy.)
 3. Open **My QR card**. Your details come back from Notion.
 

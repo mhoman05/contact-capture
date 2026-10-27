@@ -86,6 +86,20 @@ export class NotionClient {
     return this.request<NotionPage>('PATCH', `/pages/${pageId}`, { archived: true });
   }
 
+  /** Who the token belongs to: the name of the connection (integration) and its workspace. */
+  getMe(): Promise<{ name?: string; bot?: { workspace_name?: string } }> {
+    return this.request('GET', '/users/me');
+  }
+
+  /** The databases this connection can see (title and id), at most 50. */
+  async visibleDatabases(): Promise<{ title: string; id: string }[]> {
+    const res = await this.request<{ results: { id: string; title?: { plain_text?: string }[] }[] }>('POST', '/search', {
+      filter: { property: 'object', value: 'database' },
+      page_size: 50,
+    });
+    return res.results.map((d) => ({ id: d.id, title: (d.title ?? []).map((t) => t.plain_text ?? '').join('') || '(untitled)' }));
+  }
+
   /** The database object (title and properties), used to check the integration can see it. */
   getDatabase(dbId: string): Promise<{ id: string; title?: { plain_text?: string }[]; properties: Record<string, any> }> {
     return this.request('GET', `/databases/${dbId}`);

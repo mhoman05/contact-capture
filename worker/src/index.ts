@@ -345,7 +345,7 @@ export default {
     }
 
     if (url.pathname === '/me' || url.pathname === '/me/update') return handleMe(req, env, url.pathname, cors);
-    if (url.pathname === '/status') return json({ databases: await checkNotion(new NotionClient(env.NOTION_TOKEN), env) }, 200, cors);
+    if (url.pathname === '/status') return json(await checkNotion(new NotionClient(env.NOTION_TOKEN), env), 200, cors);
     if (url.pathname.startsWith('/companies/')) return handleCompanies(req, env, url, cors);
     if (url.pathname.startsWith('/tasks/')) return handleTasks(req, env, url, cors);
     if (url.pathname.startsWith('/people/')) return handlePeople(req, env, url, cors);

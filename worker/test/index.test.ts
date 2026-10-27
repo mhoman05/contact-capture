@@ -622,20 +622,24 @@ describe('tasks', () => {
     expect(tasks).toHaveLength(0);
   });
 
-  it('reports which databases the connection can see', async () => {
+  it('reports which databases the connection can see, which connection that is, and what else it can see', async () => {
     const real = notion.fetch;
     notion.fetch = (async (input: any, init: any) => {
       const u = new URL(String(input));
+      if (u.pathname === '/v1/users/me') return new Response(JSON.stringify({ name: 'Contact capture', bot: { workspace_name: 'Matthias' } }), { status: 200 });
+      if (u.pathname === '/v1/search') return new Response(JSON.stringify({ results: [{ id: 'abc', title: [{ plain_text: 'People' }] }, { id: 'def', title: [] }] }), { status: 200 });
       if (u.pathname === '/v1/databases/tasks-db') return new Response('{}', { status: 404 });
       const m = u.pathname.match(/^\/v1\/databases\/([^/]+)$/);
       if (m) return new Response(JSON.stringify({ id: m[1], title: [{ plain_text: `DB ${m[1]}` }], properties: {} }), { status: 200 });
       return real(input, init);
     }) as typeof fetch;
-    const { databases } = (await (await call('/status')).json()) as { databases: any[] };
-    const tasks = databases.find((d) => d.name === 'Tasks');
+    const status = (await (await call('/status')).json()) as any;
+    const tasks = status.databases.find((d: any) => d.name === 'Tasks');
     expect(tasks.ok).toBe(false);
     expect(tasks.error).toMatch(/Connections/);
-    expect(databases.find((d) => d.name === 'People')).toMatchObject({ ok: true, title: 'DB people-db' });
+    expect(status.databases.find((d: any) => d.name === 'People')).toMatchObject({ ok: true, title: 'DB people-db' });
+    expect(status.connection).toEqual({ name: 'Contact capture', workspace: 'Matthias' });
+    expect(status.visible).toEqual([{ id: 'abc', title: 'People' }, { id: 'def', title: '(untitled)' }]);
   });
 });
 
