@@ -34,6 +34,7 @@
   let ops = [];
   let syncing = false, flushing = false, stale = true, loadedAt = 0, current = null;
   const ui = { list: store.get('cc.t.list', 'crm'), filter: store.get('cc.t.filter', 'due'), q: '' };
+  if (!['due', 'week', 'open', 'backlog', 'done'].includes(ui.filter)) ui.filter = 'due'; // 'Waiting on' used to be a filter here; it is the Follow up list now
   const add = { due: '', types: new Set(), waiting: false, persons: [], companies: [] };
   const all = () => Object.values(state.items);
   const persist = () => kvSet(state);
@@ -41,9 +42,10 @@
   const people = () => (window.CCRecent && CCRecent.people ? CCRecent.people() : []);
   const personName = (id) => (people().find((p) => p.id === id) || {}).name || '…';
   const isOpen = (t) => t.status === 'Not started' || t.status === 'In progress';
+  // Open tasks you are waiting on someone else for live in the Follow up list, not in the two task lists.
+  const isWaiting = (t) => t.waiting && isOpen(t);
   const isCrm = (t) => t.person_ids.length > 0 || t.company_ids.length > 0;
   const dueNow = (t) => isOpen(t) && t.due && t.due <= today();
-  const peopleDue = () => people().filter((p) => p.next_followup && p.next_followup <= today());
 
   function updateBadge() {
     const n = all().filter(dueNow).length;
@@ -159,7 +161,7 @@
   }
 
   // ---- the lists ---------------------------------------------------------------------------------
-  const FILTERS = [['due', 'Today & overdue'], ['week', 'This week'], ['open', 'All open'], ['waiting', 'Waiting on'], ['backlog', 'Backlog'], ['done', 'Done']];
+  const FILTERS = [['due', 'Today & overdue'], ['week', 'This week'], ['open', 'All open'], ['backlog', 'Backlog'], ['done', 'Done']];
   function dueLabel(t) {
     if (!t.due) return '';
     const diff = Math.round((new Date(t.due + 'T00:00:00') - new Date(today() + 'T00:00:00')) / 864e5);
@@ -175,10 +177,9 @@
     const wk = plusDays(7);
     list = list.filter((t) => {
       switch (ui.filter) {
-        case 'due': return isOpen(t) && t.due && t.due <= today();
-        case 'week': return isOpen(t) && t.due && t.due <= wk;
-        case 'open': return isOpen(t);
-        case 'waiting': return t.waiting && t.status !== 'Done';
+        case 'due': return isOpen(t) && !t.waiting && t.due && t.due <= today();
+        case 'week': return isOpen(t) && !t.waiting && t.due && t.due <= wk;
+        case 'open': return isOpen(t) && !t.waiting;
         case 'backlog': return t.status === 'Backlog';
         default: return t.status === 'Done';
       }
@@ -187,7 +188,8 @@
     else list.sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999') || b.created.localeCompare(a.created));
     return list;
   }
-  const countFor = (crm) => all().filter((t) => isCrm(t) === crm && isOpen(t)).length;
+  const countFor = (crm) => all().filter((t) => isCrm(t) === crm && isOpen(t) && !t.waiting).length;
+  const waitingTasks = () => all().filter(isWaiting).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999') || b.created.localeCompare(a.created));
 
   function render() {
     updateBadge();
@@ -195,7 +197,7 @@
     $('tkSeg').querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.l === ui.list)));
     $('tkSeg').querySelector('[data-l=crm]').textContent = 'CRM tasks (' + countFor(true) + ')';
     $('tkSeg').querySelector('[data-l=todo]').textContent = 'My to-dos (' + countFor(false) + ')';
-    $('tkSeg').querySelector('[data-l=follow]').textContent = 'Follow up (' + peopleDue().length + ')';
+    $('tkSeg').querySelector('[data-l=follow]').textContent = 'Follow up (' + waitingTasks().length + ')';
     $('tkFilters').classList.toggle('hidden', follow);
     $('tkFilters').replaceChildren(...FILTERS.map(([k, label]) => { const b = el('button', 'chip', label); b.type = 'button'; b.setAttribute('aria-pressed', String(ui.filter === k)); b.onclick = () => { ui.filter = k; store.set('cc.t.filter', k); render(); }; return b; }));
     $('tkPersonHint').classList.toggle('hidden', ui.list !== 'crm' || add.persons.length > 0 || add.companies.length > 0);
@@ -232,16 +234,11 @@
   }
 
   function renderFollow(box) {
-    const list = [...peopleDue()].sort((a, b) => a.next_followup.localeCompare(b.next_followup));
     $('tkPersonHint').classList.add('hidden');
-    for (const p of list) {
-      const r = el('div', 'task'); const body = el('div', 'tbody');
-      body.append(el('div', 'ttitle', p.name));
-      body.append(el('div', 'muted late', [(p.next_followup < today() ? 'Overdue since ' : 'Due ') + p.next_followup, p.company, p.role].filter(Boolean).join(' · ')));
-      r.append(body); r.onclick = () => { if (window.CCRecent) CCRecent.openPerson(p.id); };
-      box.append(r);
-    }
-    if (!list.length) box.append(el('div', 'muted', 'Nobody to follow up with right now. Follow-up dates are set when you add people and in each person’s details.'));
+    const q = fold(ui.q.trim());
+    const list = waitingTasks().filter((t) => !q || fold([t.title, t.notes, t.next_step, t.companies.join(' '), t.person_ids.map(personName).join(' ')].join(' ')).includes(q));
+    for (const t of list) box.append(row(t));
+    if (!list.length) box.append(el('div', 'muted', 'Nothing you are waiting on. Tick “Waiting on someone else” on a task and it is listed here until it is done.'));
   }
 
   // ---- adding -----------------------------------------------------------------------------------

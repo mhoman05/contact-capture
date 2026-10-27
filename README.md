@@ -102,8 +102,8 @@ The **Tasks** tab is your Notion *Task Database*. Two lists plus follow-ups:
 
 - **CRM tasks**: tasks linked to a person or a company (the same rule as your Notion view "CRM: open follow-ups").
 - **My to-dos**: tasks linked to nobody.
-- **Follow up**: the people whose follow-up date has come (from the People tab); tap one to open them.
-- **Filters** for the two task lists: *Today & overdue*, *This week*, *All open* (Not started and In progress), *Waiting on*, *Backlog* (parked, not counted as open) and *Done* (completed in the last 45 days). A search box looks at title, notes, next step, tags, companies and linked people. The tab shows how many tasks are due or overdue.
+- **Follow up**: the open tasks you ticked *Waiting on someone else* on, from both lists, soonest due first. They are kept out of *CRM tasks* and *My to-dos* (and their counts) because you cannot do them yourself; ticking one done, as soon as the answer arrives, removes it from here. People whose follow-up date has come are in the **People** tab (filter *Follow up*).
+- **Filters** for the two task lists: *Today & overdue*, *This week*, *All open* (Not started and In progress), *Backlog* (parked, not counted as open) and *Done* (completed in the last 45 days). A search box looks at title, notes, next step, tags, companies and linked people. The tab shows how many tasks are due or overdue.
 - **Add a task in one line:** type it and press Enter. Optional: *Today / Tomorrow / Next week* or a date, *Work / Personal / Advisory*, *Waiting on someone else*, and **link to a person** (search the People list). Linking a person makes it a CRM task; without one it goes to My to-dos. New tasks start as *Not started*.
 - **Complete with one tap** (the circle). The completion date is set, and a message offers **Undo** for a few seconds. Tap a done task's circle to reopen it.
 - **Tap a task** to edit it: title, status (Not started, In progress, Backlog, Done), due date (+1 day, +1 week, no date), waiting on, linked people (tap a name to open the person), type, tags, notes, next step. *Delete* sends it to Notion's trash (restorable for 30 days).
