@@ -482,3 +482,33 @@ describe('browsing people', () => {
     expect((await call('/people/update', { id: p.id, tier: 'Z' })).status).toBe(400);
   });
 });
+
+describe('share link for the contact card', () => {
+  const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const card = 'BEGIN:VCARD\r\nVERSION:3.0\r\nN:Durán;Álvaro;;;\r\nFN:Álvaro Durán\r\nORG:Acme\\, Inc\r\nTITLE:CEO\r\nTEL;TYPE=WORK,VOICE:+34 600 111 222\r\nEMAIL;TYPE=WORK,INTERNET:a@acme.com\r\nURL:https://linkedin.com/in/alvaro\r\nitem1.URL:https://golf.example/book\r\nitem1.X-ABLabel:Indoor Golf\r\nADR;TYPE=WORK:;;Calle 1\\, Madrid;;;;\r\nNOTE:Founder\\, Indoor Golf\r\nEND:VCARD\r\n';
+  const get = (c: string | null, method = 'GET') => call(c === null ? '/v' : `/v?c=${c}`, { method });
+
+  it('returns the card as a .vcf without any access token', async () => {
+    const res = await get(b64(card));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/vcard');
+    expect(res.headers.get('Content-Disposition')).toBe('inline; filename="Alvaro-Duran.vcf"');
+    const body = await res.text();
+    expect(body).toContain('FN:Álvaro Durán');
+    expect(body).toContain('item1.X-ABLabel:Indoor Golf');
+    expect(body.endsWith('END:VCARD\r\n')).toBe(true);
+  });
+  it('refuses anything that is not a plain contact card', async () => {
+    const bad = (s: string) => get(b64(s));
+    expect((await get(null)).status).toBe(400);
+    expect((await get('%%%')).status).toBe(400);
+    expect((await bad('<html><script>alert(1)</script></html>')).status).toBe(400);
+    expect((await bad(card.replace('TITLE:CEO', 'PHOTO:data:image/png;base64,AAAA'))).status).toBe(400);
+    expect((await bad(card.replace('TITLE:CEO', 'X-EVIL:1'))).status).toBe(400);
+    expect((await bad(card.replace('https://linkedin.com/in/alvaro', 'javascript:alert(1)'))).status).toBe(400);
+    expect((await bad(card.replace('FN:Álvaro Durán\r\n', ''))).status).toBe(400);
+    expect((await bad(card + card)).status).toBe(400);
+    expect((await bad(card.replace('NOTE:Founder', 'NOTE:' + 'x'.repeat(4100)))).status).toBe(400);
+    expect((await get(b64(card), 'POST')).status).toBe(405);
+  });
+});

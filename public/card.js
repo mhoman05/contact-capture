@@ -182,6 +182,24 @@
   }
   $('editBtn').onclick = () => { editing = !editing; render(); };
 
+  // A link that saves the contact when opened: the contact card is inside the link and the service hands it back as a .vcf.
+  // (Android Chrome will not share .vcf files through the share sheet, but it shares links everywhere.)
+  function b64url(text) {
+    const bytes = new TextEncoder().encode(text); let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  $('shareLink').onclick = async () => {
+    const vcard = buildVCard(); if (!vcard) return;
+    const link = cfg().url + '/v?c=' + b64url(vcard);
+    const name = [val('First name'), val('Last name')].filter(Boolean).join(' ');
+    try {
+      if (navigator.share) { await navigator.share({ title: name, text: name + ': tap to save my contact details', url: link }); $('shareMsg').textContent = ''; return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    try { await navigator.clipboard.writeText(link); $('shareMsg').textContent = 'Link copied. Paste it into a message.'; }
+    catch { window.prompt('Copy this link and send it:', link); }
+  };
+
   async function vcfFile() { return new File([buildVCard()], ([val('First name'), val('Last name')].join('-')).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\W+/g, '-').replace(/^-|-$/g, '') + '.vcf', { type: 'text/vcard' }); }
   $('shareVcf').onclick = async () => {
     const f = await vcfFile();

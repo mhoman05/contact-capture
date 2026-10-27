@@ -241,9 +241,12 @@ a{color:var(--accent)}
       <p class="muted hidden" id="qrDense" style="margin:8px 0 0">This code holds a lot of detail. Turn the screen brightness up and hold the phone steady, or untick a group or some details.</p>
       <p class="muted" style="margin:10px 0 0">The other person opens their phone camera and points it at this code, then taps “Add contact”. No app or account needed.</p>
       <div class="row hidden" id="qrActions" style="margin-top:12px">
-        <button id="fullBtn" class="primary">Show full screen</button>
-        <button id="shareVcf">Send as contact file</button>
+        <button id="fullBtn" class="primary" style="flex-basis:100%">Show full screen</button>
+        <button id="shareLink" class="primary">Share link</button>
+        <button id="shareVcf">Save contact file</button>
       </div>
+      <p class="muted" id="shareMsg" role="status" style="margin:8px 0 0"></p>
+      <p class="muted" style="margin:6px 0 0">“Share link” sends a link through WhatsApp, Telegram, SMS or email. Whoever opens it gets “Add contact”. The details you ticked are inside the link.</p>
     </section>
 
     <section class="card">

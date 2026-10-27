@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { runCapture } from './capture';
 import { DEFAULT_MODEL, ExtractionError, extractContacts } from './extract';
+import { vcardResponse } from './vcard';
 import { createEvent, getEvent, listEvents, parseNewEvent } from './events';
 import { readMe, updateMeValue } from './me';
 import { deletePerson, findDuplicates, listPeople, mergePeople, parsePatch, personHistory, recentPeople, updatePersonFields } from './people';
@@ -242,6 +243,8 @@ export default {
     if (url.pathname === '/health') return json({ ok: true }, 200, cors);
     // Android posts shared files here; the app's service worker normally intercepts it. If it is not active yet, just open the app.
     if (url.pathname === '/share-target') return Response.redirect(new URL('/', url).href, 303);
+    // A contact card shared from "My QR": open to save the contact. Public, see vcard.ts.
+    if (url.pathname === '/v') return req.method === 'GET' ? vcardResponse(url.searchParams.get('c')) : json({ error: 'Use GET.' }, 405);
     // Everything else is a static file of the app.
     const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/recent': 'GET', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST', '/people/list': 'GET', '/people/history': 'GET' };
     const method = API[url.pathname];
