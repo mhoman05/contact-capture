@@ -1,4 +1,4 @@
-import { addDays } from './people';
+import { addDays, toPerson } from './people';
 import type { CaptureRequest, CaptureResult, ExtractedContact } from './types';
 import { createMeeting, createPerson, findOrCreateCompany, findPerson, updatePerson, NotionClient, pageTitle } from './notion';
 
@@ -82,6 +82,11 @@ export async function runCapture(deps: CaptureDeps, req: CaptureRequest): Promis
         needs_review: outcome.action === 'created',
         event: deps.event?.name ?? null,
         page_url: outcome.page.url,
+        person_id: outcome.page.id,
+        company_created_id: company?.created ? company.id : null,
+        details: (({ name, company: co, role, email, phone, linkedin, telegram }) => ({ name, company: co, role, email, phone, linkedin, telegram }))(
+          toPerson(outcome.page, new Map(company ? [[company.id, company.name]] : []), new Map()),
+        ),
         added: outcome.added,
         interaction_url: interactionUrl,
         warnings,

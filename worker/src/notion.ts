@@ -18,6 +18,7 @@ export interface NotionPage {
   properties: Record<string, any>;
   parent?: { type?: string; database_id?: string };
   created_time?: string;
+  archived?: boolean;
 }
 
 export class NotionClient {
@@ -76,6 +77,11 @@ export class NotionClient {
       cursor = res.has_more && res.next_cursor ? res.next_cursor : undefined;
     } while (cursor && rows.length < max);
     return rows;
+  }
+
+  /** Move a page to Notion's trash (restorable there for 30 days). */
+  archivePage(pageId: string): Promise<NotionPage> {
+    return this.request<NotionPage>('PATCH', `/pages/${pageId}`, { archived: true });
   }
 
   getPage(pageId: string): Promise<NotionPage> {
@@ -340,8 +346,15 @@ export async function createMeeting(
   event: { name: string } | null = null,
 ): Promise<NotionPage> {
   const summary = [note, event ? `Event: ${event.name}` : ''].filter(Boolean).join(' · ');
+  const titleText = event ? `Met ${personName} at ${event.name}` : `Met ${personName}`;
+  // A capture that is sent twice (a lost reply, or the offline queue retrying) must not log the meeting twice.
+  const same = await notion.query(dbId, { property: 'Title', title: { contains: titleText } }, 10);
+  const existing = same.find(
+    (m) => m.properties.Date?.date?.start === today && (m.properties.People?.relation ?? []).some((r: any) => r.id === personId),
+  );
+  if (existing) return existing;
   return notion.createPage(dbId, {
-    Title: P.title(event ? `Met ${personName} at ${event.name}` : `Met ${personName}`),
+    Title: P.title(titleText),
     Type: P.select(event ? 'Event' : 'In person'),
     Date: P.date(today),
     People: P.relation([personId]),

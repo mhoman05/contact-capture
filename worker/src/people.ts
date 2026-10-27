@@ -1,5 +1,5 @@
 import { listEvents } from './events';
-import { cleanEmail, cleanLinkedInLink, cleanPhone, cleanTelegram, nonEmpty, truncate } from './normalize';
+import { cleanEmail, cleanLinkedInLink, cleanPhone, cleanTelegram, linkedInSlug, nameTokens, nonEmpty, phoneDigits, sameName, similarName, telegramHandle, truncate } from './normalize';
 import { findOrCreateCompany, P, pageTitle, plain, type NotionClient, type NotionPage } from './notion';
 
 /** What the app shows and edits for one person. */
@@ -158,4 +158,165 @@ export function addDays(date: string, n: number): string {
   const t = new Date(`${date}T00:00:00Z`);
   t.setUTCDate(t.getUTCDate() + n);
   return t.toISOString().slice(0, 10);
+}
+
+// ---- removing, duplicates, merging ------------------------------------------------------------
+
+export interface DeleteDeps extends PeopleDeps {
+  interactionsDb: string;
+}
+
+const belongsTo = (page: NotionPage, db: string) => !!page.parent?.database_id && dashless(page.parent.database_id) === dashless(db);
+
+/**
+ * Move a person to Notion's trash, together with the "Met …" meetings that only involve them.
+ * When the capture also created their company page and nobody else uses it, that goes too (Undo).
+ */
+export async function deletePerson(d: DeleteDeps, id: string, companyId?: string): Promise<{ person: string; meetings: number; company: boolean } | null> {
+  const page = await d.notion.getPage(id);
+  if (!belongsTo(page, d.peopleDb)) return null;
+  let meetings = 0;
+  const linked = await d.notion.query(d.interactionsDb, { property: 'People', relation: { contains: id } }, 50);
+  for (const m of linked) {
+    const only = (m.properties.People?.relation ?? []).length === 1;
+    if (only && pageTitle(m, 'Title').startsWith('Met ')) {
+      await d.notion.archivePage(m.id);
+      meetings++;
+    }
+  }
+  if (!page.archived) await d.notion.archivePage(id);
+  let company = false;
+  if (companyId) {
+    const c = await d.notion.getPage(companyId);
+    if (belongsTo(c, d.companiesDb) && !c.archived) {
+      const users = await d.notion.query(d.peopleDb, { property: 'Company', relation: { contains: companyId } }, 1);
+      if (!users.length) {
+        await d.notion.archivePage(companyId);
+        company = true;
+      }
+    }
+  }
+  return { person: pageTitle(page, 'Name'), meetings, company };
+}
+
+export interface DupePair {
+  a: PersonItem;
+  b: PersonItem;
+  reasons: string[];
+  strength: 'high' | 'medium';
+  keep: 'a' | 'b'; // the one with more information (older when equal): the suggested one to keep
+}
+
+const filled = (p: PersonItem) => [p.email, p.phone, p.linkedin, p.telegram, p.role, p.company, p.location, p.how].filter(Boolean).length + Math.min(p.notes.length, 200) / 200;
+
+/** Pairs of people who look like the same person, strongest first. Never merges anything by itself. */
+export async function findDuplicates(d: PeopleDeps, max = 40): Promise<DupePair[]> {
+  const { companies, events } = await lookups(d);
+  const rows = await d.notion.queryAll(d.peopleDb, 1000);
+  const people = rows.map((r) => toPerson(r, companies, events)).filter((p) => p.name);
+  const pairs = new Map<string, { i: number; j: number; reasons: Set<string>; strong: boolean }>();
+  const add = (i: number, j: number, reason: string, strong: boolean) => {
+    if (i === j) return;
+    const [x, y] = i < j ? [i, j] : [j, i];
+    const k = `${x}:${y}`;
+    const e = pairs.get(k) ?? { i: x, j: y, reasons: new Set<string>(), strong: false };
+    e.reasons.add(reason);
+    e.strong ||= strong;
+    pairs.set(k, e);
+  };
+  const group = (label: string, key: (p: PersonItem) => string | null) => {
+    const idx = new Map<string, number[]>();
+    people.forEach((p, i) => {
+      const k = key(p);
+      if (k) idx.set(k, [...(idx.get(k) ?? []), i]);
+    });
+    for (const list of idx.values()) for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) add(list[a], list[b], label, true);
+  };
+  group('Same email', (p) => p.email.toLowerCase() || null);
+  group('Same phone number', (p) => { const dg = phoneDigits(p.phone); return dg.length >= 8 ? dg.slice(-9) : null; });
+  group('Same LinkedIn profile', (p) => linkedInSlug(p.linkedin));
+  group('Same Telegram', (p) => telegramHandle(p.telegram));
+
+  // Names: people with different email addresses are different people, whatever they are called.
+  const conflict = (a: PersonItem, b: PersonItem) => (a.email && b.email && a.email.toLowerCase() !== b.email.toLowerCase()) || (a.linkedin && b.linkedin && linkedInSlug(a.linkedin) !== linkedInSlug(b.linkedin));
+  const byToken = new Map<string, number[]>();
+  people.forEach((p, i) => { for (const t of new Set(nameTokens(p.name))) byToken.set(t, [...(byToken.get(t) ?? []), i]); });
+  people.forEach((p, i) => {
+    const toks = [...new Set(nameTokens(p.name))];
+    if (!toks.length) return;
+    const lists = toks.map((t) => byToken.get(t) ?? []).sort((x, y) => x.length - y.length);
+    for (const j of lists[0]) {
+      if (j <= i || conflict(p, people[j])) continue;
+      if (sameName(p.name, people[j].name)) add(i, j, 'Same name', false);
+      else if (similarName(p.name, people[j].name)) add(i, j, 'Similar name', false);
+    }
+  });
+
+  return [...pairs.values()]
+    .map((e): DupePair => {
+      const a = people[e.i], b = people[e.j];
+      const sa = filled(a), sb = filled(b);
+      const keep = sa > sb ? 'a' : sb > sa ? 'b' : (a.created <= b.created ? 'a' : 'b');
+      return { a, b, reasons: [...e.reasons], strength: e.strong ? 'high' : 'medium', keep };
+    })
+    .sort((x, y) => (x.strength === y.strength ? 0 : x.strength === 'high' ? -1 : 1))
+    .slice(0, max);
+}
+
+/** Merge `removeId` into `keepId`: fills empty fields, moves every link and the notes over, then trashes the duplicate. */
+export async function mergePeople(d: PeopleDeps, keepId: string, removeId: string, today: string): Promise<PersonItem | null | 'same'> {
+  if (keepId === removeId) return 'same';
+  const [keep, gone] = await Promise.all([d.notion.getPage(keepId), d.notion.getPage(removeId)]);
+  if (!belongsTo(keep, d.peopleDb) || !belongsTo(gone, d.peopleDb)) return null;
+  const kp = keep.properties, gp = gone.properties;
+  // Notion's JSON names the type of every property; looking at which value is present also works for hand-made data.
+  const kind = (p: any): string => p?.type ?? ['email', 'phone_number', 'url', 'rich_text', 'select', 'date', 'relation'].find((k) => k in (p ?? {})) ?? '';
+  const props: Record<string, unknown> = {};
+  const isEmpty = (p: any): boolean => {
+    if (!p) return true;
+    switch (kind(p)) {
+      case 'email': return !p.email;
+      case 'phone_number': return !p.phone_number;
+      case 'url': return !p.url;
+      case 'rich_text': return plain(p).trim() === '';
+      case 'select': return !p.select;
+      case 'date': return !p.date;
+      case 'relation': return (p.relation ?? []).length === 0;
+      default: return true;
+    }
+  };
+  const copy = (name: string) => {
+    const g = gp[name];
+    if (isEmpty(g) || !isEmpty(kp[name])) return;
+    const t = kind(g);
+    if (t === 'email') props[name] = { email: g.email };
+    else if (t === 'phone_number') props[name] = { phone_number: g.phone_number };
+    else if (t === 'url') props[name] = { url: g.url };
+    else if (t === 'rich_text') props[name] = P.rich(plain(g));
+    else if (t === 'select') props[name] = { select: { name: g.select.name } };
+    else if (t === 'date') props[name] = { date: { start: g.date.start, end: g.date.end ?? null } };
+  };
+  for (const n of ['Email', 'Phone', 'LinkedIn', 'Telegram', 'Role', 'Location', 'How We Know Each Other', 'Tier', 'Birthday', 'Next Follow-up', 'Last Enriched']) copy(n);
+  // Contact Type: both sets of tags
+  if ((gp['Contact Type']?.multi_select ?? []).length) {
+    const names = new Set<string>([...(kp['Contact Type']?.multi_select ?? []), ...gp['Contact Type'].multi_select].map((o: any) => o.name));
+    props['Contact Type'] = { multi_select: [...names].map((name) => ({ name })) };
+  }
+  // Links: everything the duplicate was connected to now also points at the one you keep.
+  for (const [name, g] of Object.entries<any>(gp)) {
+    if (kind(g) !== 'relation') continue;
+    const have: string[] = (kp[name]?.relation ?? []).map((r: any) => r.id);
+    if (name === 'Company' && have.length) continue; // one company: keep yours
+    const extra = (g.relation ?? []).map((r: any) => r.id).filter((x: string) => !have.includes(x) && x !== keepId && x !== removeId);
+    if (extra.length) props[name] = P.relation(name === 'Company' ? extra.slice(0, 1) : [...have, ...extra]);
+  }
+  const goneNotes = plain(gp.Notes).trim();
+  const keepNotes = plain(kp.Notes).trim();
+  const line = `${today}: Merged with duplicate "${pageTitle(gone, 'Name')}".${goneNotes ? `\nNotes from the duplicate:\n${goneNotes}` : ''}`;
+  props.Notes = P.rich(truncate(keepNotes ? `${keepNotes}\n${line}` : line, 1900));
+
+  const updated = await d.notion.updatePage(keepId, props);
+  await d.notion.archivePage(removeId); // last, so a failure above loses nothing
+  const { companies, events } = await lookups(d);
+  return toPerson(updated, companies, events);
 }

@@ -3,7 +3,7 @@ import { runCapture } from './capture';
 import { DEFAULT_MODEL, ExtractionError, extractContacts } from './extract';
 import { createEvent, getEvent, listEvents, parseNewEvent } from './events';
 import { readMe, updateMeValue } from './me';
-import { parsePatch, recentPeople, updatePersonFields } from './people';
+import { deletePerson, findDuplicates, mergePeople, parsePatch, recentPeople, updatePersonFields } from './people';
 import { NotionClient, NotionError } from './notion';
 import { cleanEmail, cleanLinkedInLink, cleanPhone, cleanTelegram, cleanWebsite, nonEmpty } from './normalize';
 import type { CaptureImage, CaptureRequest, Env, ManualContact } from './types';
@@ -161,6 +161,7 @@ async function handlePeople(req: Request, env: Env, url: URL, cors: Record<strin
       const n = Number(url.searchParams.get('limit') ?? '100');
       return json({ people: await recentPeople(deps, Number.isFinite(n) ? n : 100) }, 200, cors);
     }
+    if (url.pathname === '/people/duplicates') return json({ pairs: await findDuplicates(deps) }, 200, cors);
     const raw = await req.text();
     if (raw.length > 20_000) return json({ error: 'Request too large.' }, 413, cors);
     let body: unknown;
@@ -168,6 +169,21 @@ async function handlePeople(req: Request, env: Env, url: URL, cors: Record<strin
       body = JSON.parse(raw);
     } catch {
       return json({ error: 'Body is not valid JSON.' }, 400, cors);
+    }
+    const id = (v: unknown) => (typeof v === 'string' && /^[0-9a-z-]{6,40}$/i.test(v) ? v : null);
+    const b = (body ?? {}) as Record<string, unknown>;
+    if (url.pathname === '/people/delete') {
+      if (!id(b.id) || (b.company_id != null && !id(b.company_id))) return json({ error: 'Send the id of the person.' }, 400, cors);
+      if (!env.NOTION_INTERACTIONS_DB) return json({ error: 'NOTION_INTERACTIONS_DB is not set.' }, 503, cors);
+      const removed = await deletePerson({ ...deps, interactionsDb: env.NOTION_INTERACTIONS_DB }, b.id as string, (b.company_id as string | undefined) ?? undefined);
+      return removed ? json({ removed }, 200, cors) : json({ error: 'That person is not in your People database.' }, 404, cors);
+    }
+    if (url.pathname === '/people/merge') {
+      if (!id(b.keep_id) || !id(b.remove_id)) return json({ error: 'Send keep_id and remove_id.' }, 400, cors);
+      const day = typeof b.today === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.today) ? b.today : new Date().toISOString().slice(0, 10);
+      const merged = await mergePeople(deps, b.keep_id as string, b.remove_id as string, day);
+      if (merged === 'same') return json({ error: 'Pick two different people.' }, 400, cors);
+      return merged ? json({ person: merged }, 200, cors) : json({ error: 'Both people must be in your People database.' }, 404, cors);
     }
     const parsed = parsePatch(body);
     if (typeof parsed === 'string') return json({ error: parsed }, 400, cors);
@@ -214,7 +230,7 @@ export default {
     // Android posts shared files here; the app's service worker normally intercepts it. If it is not active yet, just open the app.
     if (url.pathname === '/share-target') return Response.redirect(new URL('/', url).href, 303);
     // Everything else is a static file of the app.
-    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/recent': 'GET', '/people/update': 'POST' };
+    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/recent': 'GET', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST' };
     const method = API[url.pathname];
     if (!method) {
       return env.ASSETS ? env.ASSETS.fetch(req) : json({ error: 'Not found.' }, 404, cors);
@@ -231,7 +247,7 @@ export default {
     }
 
     if (url.pathname === '/me' || url.pathname === '/me/update') return handleMe(req, env, url.pathname, cors);
-    if (url.pathname === '/people/recent' || url.pathname === '/people/update') return handlePeople(req, env, url, cors);
+    if (url.pathname.startsWith('/people/')) return handlePeople(req, env, url, cors);
     if (url.pathname === '/events' || url.pathname === '/events/create') return handleEvents(req, env, url.pathname, cors);
 
     const length = Number(req.headers.get('Content-Length') ?? '0');

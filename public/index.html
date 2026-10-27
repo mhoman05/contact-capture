@@ -62,6 +62,9 @@ button.icon{padding:0;width:44px}
 .trow .tnote{flex:1;min-width:0;display:grid;gap:4px}
 .trow .tnote label{margin:0;font-size:13px}
 .trow .rm{flex:none;min-height:36px;width:36px;padding:0;border-radius:50%}
+.pair{border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:12px}
+.pair .who{padding:8px 0;border-top:1px solid var(--line)}
+.pair .who:first-of-type{border-top:0}
 .person{width:100%;display:block;text-align:left;margin-bottom:8px;padding:10px 12px;min-height:0}
 .person .ptop{display:flex;justify-content:space-between;gap:8px}
 .tag.due{background:var(--warn-bg);color:var(--warn);font-weight:600}
@@ -121,6 +124,13 @@ a{color:var(--accent)}
   </section>
 
   <div id="addView" style="display:contents">
+  <section class="card hidden" id="queue">
+    <h2 id="qTitle"></h2>
+    <p class="muted" style="margin:0 0 10px">Saved on this phone because there was no connection. They are sent by themselves once you are online and the app is open.</p>
+    <div class="row"><button id="qSend" class="primary" type="button">Send now</button><button id="qShow" type="button">Show</button></div>
+    <div id="qList" class="hidden" style="margin-top:10px"></div>
+  </section>
+
   <section class="card hidden" id="evPicker">
     <h2>Which event are you at?</h2>
     <input type="text" id="evFilter" placeholder="Search your events…" autocomplete="off">
@@ -196,9 +206,11 @@ a{color:var(--accent)}
         <button class="chip" type="button" data-f="all" aria-pressed="true">All</button>
         <button class="chip" type="button" data-f="review">To review</button>
         <button class="chip" type="button" data-f="due">Follow up</button>
+        <button class="chip" type="button" data-f="dupes">Duplicates</button>
       </div>
       <input type="text" id="recFilter" placeholder="Search name, company, note…" autocomplete="off">
       <div id="recList" style="margin-top:10px"></div>
+      <div id="dupList" class="hidden" style="margin-top:10px"></div>
       <div class="row" style="margin-top:6px"><button id="recReload" type="button">Reload from Notion</button></div>
       <p class="muted" id="recStatus" role="status" style="margin:10px 0 0"></p>
     </section>
@@ -245,7 +257,7 @@ a{color:var(--accent)}
       <label for="p-name">Name</label><input type="text" id="p-name" autocomplete="off">
       <label for="p-company">Company</label><input type="text" id="p-company" autocomplete="off">
       <label for="p-role">Role</label><input type="text" id="p-role" autocomplete="off">
-      <label for="p-phone">Phone</label><input type="text" id="p-phone" inputmode="tel" autocomplete="off">
+      <label for="p-phone-field">Phone</label><input type="text" id="p-phone-field" inputmode="tel" autocomplete="off">
       <label for="p-email">Email</label><input type="text" id="p-email" inputmode="email" autocomplete="off">
       <label for="p-linkedin">LinkedIn link</label><input type="text" id="p-linkedin" inputmode="url" autocomplete="off">
       <label for="p-telegram">Telegram</label><input type="text" id="p-telegram" autocomplete="off">
@@ -267,6 +279,7 @@ a{color:var(--accent)}
     </section>
     <button class="primary" id="p-save" type="button">Save to Notion</button>
     <p class="muted" id="p-msg" role="status" style="margin:0"></p>
+    <div class="row"><button id="p-savephone" type="button">📱 Save to phone contacts</button><button id="p-delete" type="button" style="color:var(--bad)">🗑 Delete person</button></div>
   </div>
 </div>
 
@@ -425,6 +438,7 @@ a{color:var(--accent)}
   function showResult(nodes) { const r = $('result'); r.replaceChildren(...nodes); r.classList.remove('hidden'); r.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
 
+  window.ccRender = (d) => renderOutcome(d);
   function renderOutcome(data) {
     const nodes = [];
     for (const r of data.results || []) {
@@ -436,9 +450,29 @@ a{color:var(--accent)}
       if (r.event) box.append(el('div', 'muted', 'Linked to ' + r.event + '.'));
       if (r.interaction_url) box.append(el('div', 'muted', 'Meeting logged for today.'));
       for (const w of r.warnings || []) box.append(el('div', 'warn', w));
-      const links = el('div'); links.style.marginTop = '8px';
-      const a = el('a', '', 'Open in Notion'); a.href = r.page_url; a.target = '_blank'; a.rel = 'noopener';
-      links.append(a); box.append(links);
+      const links = el('div', 'row'); links.style.marginTop = '8px'; links.style.alignItems = 'center';
+      const a = el('a', '', 'Open in Notion'); a.href = r.page_url; a.target = '_blank'; a.rel = 'noopener'; a.style.flex = 'none';
+      links.append(a);
+      if (r.details && window.CCVcard) {
+        const sv = el('button', 'chip', '📱 Save to phone contacts'); sv.type = 'button';
+        sv.onclick = async () => { const m = await CCVcard.share([{ ...r.details, note: r.event ? 'Met at ' + r.event : '' }]); if (m) { sv.textContent = m; } };
+        links.append(sv);
+      }
+      if (r.action === 'created' && r.person_id) {
+        const un = el('button', 'chip', '↩ Undo (remove)'); un.type = 'button';
+        un.onclick = async () => {
+          if (!confirm('Remove ' + r.name + ' again? They go to Notion\'s trash (restorable there for 30 days).')) return;
+          un.disabled = true; un.textContent = 'Removing…';
+          try {
+            const res = await fetch(cfg().url + '/people/delete', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg().tok }, body: JSON.stringify({ id: r.person_id, company_id: r.company_created_id }) });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(d.error || 'Something went wrong (' + res.status + ').');
+            un.textContent = 'Removed ✓'; box.style.opacity = '.55'; a.removeAttribute('href'); if (window.CCRecent) CCRecent.invalidate();
+          } catch (e) { un.disabled = false; un.textContent = '↩ Undo (remove)'; box.append(el('div', 'err', 'Not removed: ' + e.message)); }
+        };
+        links.append(un);
+      }
+      box.append(links);
       nodes.push(box);
     }
     if ((data.results || []).some((r) => r.needs_review)) nodes.push(el('p', 'muted', 'New people are marked “Needs review” in Notion. Find them in People → “To review (captured)” and untick the box when done.'));
@@ -480,40 +514,64 @@ a{color:var(--accent)}
     (r.fields.name ? $('m-company') : $('m-name')).focus();
   };
 
+  // What was typed or chosen is cleared once it has been sent, or safely stored on the phone to be sent later.
+  function clearInputs() {
+    $('note').value = '';
+    state.images.forEach((i) => URL.revokeObjectURL(i.url)); state.images = [];
+    $('text').value = ''; $('showText').dataset.open = ''; clearShared(); clearManual();
+  }
+  const captureLabel = (body) => [
+    body.images.length ? body.images.length + (body.images.length === 1 ? ' photo' : ' photos') : '',
+    body.contact ? body.contact.name : '',
+    !body.images.length && !body.contact && body.text ? 'shared text' : '',
+    window.CCEvent && window.CCEvent.name() ? window.CCEvent.name() : '',
+  ].filter(Boolean).join(' · ');
+
   $('send').onclick = async () => {
     if (state.busy) return;
     state.busy = true;
     const btn = $('send'); btn.disabled = true; btn.replaceChildren(el('span', 'spin'), document.createTextNode(' Reading and filing…'));
     $('result').classList.add('hidden');
     const note = state.images.length ? '' : $('note').value.trim(); // with photos, each photo carries its own note
+    let body = null;
     try {
       const images = [];
       for (const im of state.images) images.push({ media_type: 'image/jpeg', data: await toJpegBase64(im.blob), note: (im.note || '').trim() });
-      const c = new AbortController(); const timer = setTimeout(() => c.abort(), 120000);
-      const res = await fetch(cfg().url + '/capture', {
-        method: 'POST', signal: c.signal,
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg().tok },
-        body: JSON.stringify({ images, text: $('text').value.trim(), note, today: localDate(), event_id: window.CCEvent ? window.CCEvent.current() : null, follow_up_days: Math.max(0, Math.min(90, parseInt(store.get('cc.fu', '7'), 10) || 0)), contact: manualContact(), log_meeting: (state.images.length > 0 || !!manualContact()) && $('meet').checked }),
-      }).finally(() => clearTimeout(timer));
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      body = { images, text: $('text').value.trim(), note, today: localDate(), event_id: window.CCEvent ? window.CCEvent.current() : null, follow_up_days: Math.max(0, Math.min(90, parseInt(store.get('cc.fu', '7'), 10) || 0)), contact: manualContact(), log_meeting: (state.images.length > 0 || !!manualContact()) && $('meet').checked };
+      let res = null, data = {}, problem = '';
+      try {
+        const c = new AbortController(); const timer = setTimeout(() => c.abort(), 120000);
+        res = await fetch(cfg().url + '/capture', {
+          method: 'POST', signal: c.signal,
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg().tok },
+          body: JSON.stringify(body),
+        }).finally(() => clearTimeout(timer));
+        data = await res.json().catch(() => ({}));
+        if (res.status === 429 || res.status >= 500) problem = data.error || 'The service had a problem (' + res.status + ').';
+      } catch (e) { problem = e.name === 'AbortError' ? 'This took too long.' : 'No connection to the service.'; }
+
+      if (problem) {
+        // No signal or a hiccup: keep the capture on the phone and send it later, so nothing is lost at the event.
+        let saved = false;
+        try { if (window.CCQueue) { await CCQueue.add(body, captureLabel(body)); saved = true; } } catch { /* storage unavailable */ }
+        if (saved) {
+          clearInputs();
+          const n = await CCQueue.count();
+          showResult([el('div', 'warn', problem + ' Saved on this phone (' + n + ' waiting). It sends by itself when you are back online with the app open.')]);
+        } else showResult([el('div', 'err', problem + ' Your photos are still here, try again.')]);
+      } else if (!res.ok) {
         const msg = res.status === 401 ? 'The access token was not accepted. Check it in settings (⚙).' : (data.error || 'Something went wrong (' + res.status + ').');
         showResult([el('div', 'err', msg)]);
       } else {
         renderOutcome(data);
-        if ((data.results || []).length) {
-          $('note').value = ''; if (window.CCRecent) CCRecent.invalidate();
-          state.images.forEach((i) => URL.revokeObjectURL(i.url)); state.images = [];
-          $('text').value = ''; $('showText').dataset.open = ''; clearShared(); clearManual();
-        }
+        if ((data.results || []).length) { clearInputs(); if (window.CCRecent) CCRecent.invalidate(); }
       }
     } catch (e) {
-      const msg = e.name === 'AbortError' ? 'This took too long. Your photos are still here, try again.' :
-        e instanceof DOMException || /image|bitmap/i.test(String(e)) ? 'This image could not be read. Try another photo.' :
-        'No connection to the service. Your photos are still here, try again.';
+      const msg = e instanceof DOMException || /image|bitmap/i.test(String(e)) ? 'This image could not be read. Try another photo.' : 'Something went wrong: ' + e.message;
       showResult([el('div', 'err', msg)]);
     } finally { state.busy = false; refresh(); }
   };
+
 
   // ---- start -------------------------------------------------------------------
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
@@ -525,5 +583,7 @@ a{color:var(--accent)}
 <script src="card.js"></script>
 <script src="events.js"></script>
 <script src="recent.js"></script>
+<script src="vcard.js"></script>
+<script src="queue.js"></script>
 </body>
 </html>

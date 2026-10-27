@@ -354,4 +354,16 @@ describe('events and per-contact notes', () => {
     await runCapture(deps([contact({ full_name: 'No Reminder', email: 'n@r.com', linkedin_url: null })]), request({ log_meeting: false }));
     expect(prop('No Reminder', 'Next Follow-up')).toBeUndefined();
   });
+
+  it('returns what Undo and "Save to phone contacts" need, and logs a meeting only once for a repeated send', async () => {
+    const req = request({ log_meeting: true });
+    const first = await runCapture(deps([contact()]), req);
+    const r = first.results[0];
+    expect(r.person_id).toBe(fake.rows.find((x) => x.db === PEOPLE)!.id);
+    expect(r.company_created_id).toBe(fake.rows.find((x) => x.db === COMPANIES)!.id);
+    expect(r.details).toEqual({ name: 'Jane Doe', company: 'Acme Inc.', role: 'Head of Sales', email: 'jane@acme.com', phone: '+34 600 111 222', linkedin: 'https://www.linkedin.com/in/janedoe', telegram: '' });
+    const again = await runCapture(deps([contact()]), req);
+    expect(again.results[0].company_created_id).toBeNull();
+    expect(fake.rows.filter((x) => x.db === INTERACTIONS)).toHaveLength(1);
+  });
 });

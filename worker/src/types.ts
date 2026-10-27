@@ -59,6 +59,9 @@ export interface CaptureResult {
   event: string | null; // the event they were linked to
   needs_review: boolean; // new people are flagged in Notion so they show up in the review view
   page_url: string;
+  person_id: string;
+  company_created_id: string | null; // set when this capture created the company page (so Undo can remove it)
+  details: { name: string; company: string; role: string; email: string; phone: string; linkedin: string; telegram: string }; // as saved, for "Save to phone contacts"
   added: string[]; // CRM fields that were filled in
   interaction_url: string | null;
   warnings: string[];

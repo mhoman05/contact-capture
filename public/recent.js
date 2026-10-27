@@ -15,6 +15,9 @@
 
   let people = (() => { try { return JSON.parse(store.get('cc.recent.people', '[]')); } catch { return []; } })();
   let filter = 'all', stale = true, loadedAt = 0, current = null;
+  let pairs = null; // duplicate suggestions, loaded when the Duplicates filter is opened
+  const dismissed = (() => { try { return new Set(JSON.parse(store.get('cc.dupe.no', '[]'))); } catch { return new Set(); } })();
+  const pairKey = (p) => [p.a.id, p.b.id].sort().join('|');
 
   const due = (p) => !!p.next_followup && p.next_followup <= today();
   const dueCount = () => people.filter(due).length;
@@ -41,6 +44,10 @@
   }
 
   function render() {
+    const dupMode = filter === 'dupes';
+    $('recChips').querySelector('[data-f=dupes]').textContent = 'Duplicates' + (pairs ? ' (' + pairs.filter((p) => !dismissed.has(pairKey(p))).length + ')' : '');
+    $('recList').classList.toggle('hidden', dupMode); $('dupList').classList.toggle('hidden', !dupMode); $('recFilter').classList.toggle('hidden', dupMode);
+    if (dupMode) { document.querySelectorAll('#recChips button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.f === filter))); renderDupes(); updateBadge(); return; }
     const q = $('recFilter').value.trim().toLowerCase();
     let list = people.filter((p) => (filter === 'review' ? p.needs_review : filter === 'due' ? due(p) : true))
       .filter((p) => !q || [p.name, p.company, p.role, p.how, p.notes, p.events.join(' ')].join(' ').toLowerCase().includes(q));
@@ -82,10 +89,11 @@
   }
 
   // ---- one person -----------------------------------------------------------
+  const pid = (k) => (k === 'phone' ? 'p-phone-field' : 'p-' + k); // the Save-to-phone button has its own id
   const FIELDS = ['name', 'company', 'role', 'phone', 'email', 'linkedin', 'telegram', 'location'];
   function openSheet(p) {
     current = p;
-    for (const k of FIELDS) $('p-' + k).value = p[k] || '';
+    for (const k of FIELDS) $(pid(k)).value = p[k] || '';
     $('p-note').value = ''; $('p-follow').value = p.next_followup || ''; $('p-review').checked = !!p.needs_review;
     $('p-notes').textContent = p.notes || 'No notes yet.';
     $('p-how').textContent = [p.how, p.events.length ? 'Events: ' + p.events.join(', ') : ''].filter(Boolean).join(' · ');
@@ -107,7 +115,7 @@
   async function save(extra) {
     if (!current) return;
     const body = { id: current.id, today: today(), ...extra };
-    for (const k of FIELDS) { const v = $('p-' + k).value.trim(); if (v !== (current[k] || '')) body[k] = v; }
+    for (const k of FIELDS) { const v = $(pid(k)).value.trim(); if (v !== (current[k] || '')) body[k] = v; }
     const note = $('p-note').value.trim(); if (note) body.note = note;
     if ($('p-review').checked !== !!current.needs_review) body.needs_review = $('p-review').checked;
     if (!('next_followup' in body) && $('p-follow').value !== (current.next_followup || '')) body.next_followup = $('p-follow').value;
@@ -123,10 +131,70 @@
     $('p-save').disabled = false;
   }
   $('p-save').onclick = () => save({});
+  $('p-savephone').onclick = async () => {
+    if (!current) return;
+    const m = await CCVcard.share([{ name: $('p-name').value.trim(), company: $('p-company').value.trim(), role: $('p-role').value.trim(), phone: $('p-phone-field').value.trim(), email: $('p-email').value.trim(), linkedin: $('p-linkedin').value.trim(), telegram: $('p-telegram').value.trim(), note: current.how || '' }]);
+    if (m) { $('p-msg').classList.remove('bad'); $('p-msg').textContent = m; }
+  };
+  $('p-delete').onclick = async () => {
+    if (!current || !confirm('Delete ' + current.name + '? They (and the meeting logged for them) go to Notion\'s trash, restorable there for 30 days.')) return;
+    $('p-delete').disabled = true; $('p-msg').classList.remove('bad'); $('p-msg').textContent = 'Deleting…';
+    try {
+      await api('/people/delete', { method: 'POST', body: JSON.stringify({ id: current.id }) });
+      people = people.filter((x) => x.id !== current.id); store.set('cc.recent.people', JSON.stringify(people));
+      if (pairs) pairs = pairs.filter((p) => p.a.id !== current.id && p.b.id !== current.id);
+      closeSheet(); render();
+    } catch (e) { $('p-msg').classList.add('bad'); $('p-msg').textContent = 'Not deleted: ' + e.message; }
+    $('p-delete').disabled = false;
+  };
   $('p-done').onclick = () => { $('p-follow').value = ''; if (!$('p-note').value.trim()) $('p-note').value = 'Followed up'; save({ next_followup: '' }); };
   document.querySelectorAll('[data-snooze]').forEach((b) => { b.onclick = () => { $('p-follow').value = plusDays(Number(b.dataset.snooze)); }; });
 
-  document.querySelectorAll('#recChips button').forEach((b) => { b.onclick = () => { filter = b.dataset.f; render(); }; });
+  // ---- duplicate suggestions --------------------------------------------------
+  async function loadPairs() {
+    setStatus('Looking for duplicates…');
+    try { pairs = (await api('/people/duplicates')).pairs; setStatus(''); }
+    catch (e) { setStatus(e.message, true); }
+    render();
+  }
+  function who(p, suggested, onKeep) {
+    const d = el('div', 'who');
+    const head = el('div', 'ptop'); head.append(el('b', '', p.name), el('span', 'muted', 'added ' + ago(p.created)));
+    d.append(head);
+    const lines = [[p.company, p.role].filter(Boolean).join(' · '), [p.email, p.phone].filter(Boolean).join(' · '), [p.linkedin && 'LinkedIn', p.telegram && 'Telegram'].filter(Boolean).join(' · '), p.events.join(', '), p.notes ? p.notes.split('\n').pop() : ''];
+    for (const l of lines) if (l) d.append(el('div', 'muted', l));
+    const b = el('button', suggested ? 'primary' : '', 'Keep this one' + (suggested ? ' (suggested)' : '')); b.type = 'button'; b.style.marginTop = '6px'; b.style.minHeight = '40px'; b.style.width = '100%';
+    b.onclick = onKeep; d.append(b);
+    return d;
+  }
+  async function merge(pair, keepSide) {
+    const keep = pair[keepSide], gone = pair[keepSide === 'a' ? 'b' : 'a'];
+    if (!confirm('Keep "' + keep.name + '" and merge "' + gone.name + '" into it?\n\n' + gone.name + '’s details fill empty fields of ' + keep.name + ', their links and notes move over, and ' + gone.name + ' goes to Notion’s trash (restorable for 30 days).')) return;
+    setStatus('Merging…');
+    try {
+      await api('/people/merge', { method: 'POST', body: JSON.stringify({ keep_id: keep.id, remove_id: gone.id, today: today() }) });
+      pairs = pairs.filter((p) => ![p.a.id, p.b.id].includes(gone.id));
+      people = people.filter((x) => x.id !== gone.id); store.set('cc.recent.people', JSON.stringify(people)); stale = true;
+      setStatus('Merged ' + gone.name + ' into ' + keep.name + '.');
+    } catch (e) { setStatus('Not merged: ' + e.message, true); }
+    render();
+  }
+  function renderDupes() {
+    const box = $('dupList'); box.replaceChildren();
+    if (!pairs) { loadPairs(); return; }
+    const list = pairs.filter((p) => !dismissed.has(pairKey(p)));
+    if (!list.length) box.append(el('div', 'muted', 'No duplicates found. People who look alike but have different emails are not suggested.'));
+    for (const p of list) {
+      const card = el('div', 'pair');
+      const tags = el('div'); for (const r of p.reasons) tags.append(el('span', 'tag' + (p.strength === 'high' ? ' due' : ''), r)); card.append(tags);
+      card.append(who(p.a, p.keep === 'a', () => merge(p, 'a')), who(p.b, p.keep === 'b', () => merge(p, 'b')));
+      const no = el('button', 'chip', 'Different people'); no.type = 'button'; no.style.marginTop = '4px';
+      no.onclick = () => { dismissed.add(pairKey(p)); store.set('cc.dupe.no', JSON.stringify([...dismissed])); render(); };
+      card.append(no); box.append(card);
+    }
+  }
+
+  document.querySelectorAll('#recChips button').forEach((b) => { b.onclick = () => { filter = b.dataset.f; if (filter === 'dupes') pairs = null; render(); }; });
   $('recFilter').oninput = render;
   $('recReload').onclick = () => load(true);
 

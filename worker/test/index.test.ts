@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import worker, { parseRequest } from '../src/index';
 import type { Env } from '../src/types';
 import { FakeNotion, rich, title } from './fake-notion';
@@ -304,5 +304,114 @@ describe('follow-up date in the capture request', () => {
   it('accepts a sensible number of days only', () => {
     expect((parseRequest({ images: [ok], follow_up_days: 7 }, 'x') as any).follow_up_days).toBe(7);
     for (const bad of [0, -1, 1.5, 400, '7']) expect((parseRequest({ images: [ok], follow_up_days: bad }, 'x') as any).follow_up_days).toBeUndefined();
+  });
+});
+
+describe('delete, duplicates and merge', () => {
+  const authed = { Authorization: 'Bearer correct horse' };
+  let notion: FakeNotion;
+  const dEnv = { ...env, NOTION_PEOPLE_DB: 'people-db', NOTION_COMPANIES_DB: 'companies-db', NOTION_INTERACTIONS_DB: 'interactions-db', NOTION_EVENTS_DB: 'events-db' };
+  const call = (path: string, body?: unknown) => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((i: any, n: any) => notion.fetch(i, n)) as typeof fetch;
+    const init: RequestInit = body === undefined ? { headers: authed } : { method: 'POST', headers: authed, body: JSON.stringify(body) };
+    return worker.fetch(new Request(`https://w.test${path}`, init), dEnv).finally(() => (globalThis.fetch = realFetch));
+  };
+  const person = (name: string, extra: Record<string, unknown> = {}) => notion.seed('people-db', { Name: title(name), Notes: rich(''), ...extra });
+  const meeting = (titleText: string, ...people: string[]) => notion.seed('interactions-db', { Title: title(titleText), People: { relation: people.map((id) => ({ id })) } });
+  beforeEach(() => { notion = new FakeNotion(); });
+
+  describe('delete', () => {
+    it('trashes the person and the meetings only they were in, leaves shared meetings', async () => {
+      const ann = person('Ann One');
+      const bob = person('Bob Two');
+      const solo = meeting('Met Ann One at MERGE', ann.id);
+      const shared = meeting('Call with Ann and Bob', ann.id, bob.id);
+      const sharedMet = meeting('Met Ann One and friends', ann.id, bob.id);
+      const res = await call('/people/delete', { id: ann.id });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as any).removed).toMatchObject({ person: 'Ann One', meetings: 1, company: false });
+      expect(ann.archived && solo.archived).toBe(true);
+      expect(shared.archived || sharedMet.archived || bob.archived).toBeFalsy();
+    });
+    it('trashes a company the capture created, but only if nobody else uses it', async () => {
+      const co = notion.seed('companies-db', { Name: title('Newco') });
+      const ann = person('Ann One', { Company: { relation: [{ id: co.id }] } });
+      const bob = person('Bob Two', { Company: { relation: [{ id: co.id }] } });
+      expect(((await (await call('/people/delete', { id: ann.id, company_id: co.id })).json()) as any).removed.company).toBe(false);
+      expect(co.archived).toBeFalsy();
+      expect(((await (await call('/people/delete', { id: bob.id, company_id: co.id })).json()) as any).removed.company).toBe(true);
+      expect(co.archived).toBe(true);
+    });
+    it('refuses pages that are not people, and is safe to repeat', async () => {
+      const co = notion.seed('companies-db', { Name: title('Acme') });
+      expect((await call('/people/delete', { id: co.id })).status).toBe(404);
+      expect(co.archived).toBeFalsy();
+      const ann = person('Ann One');
+      expect((await call('/people/delete', { id: ann.id })).status).toBe(200);
+      expect((await call('/people/delete', { id: ann.id })).status).toBe(200);
+      expect((await call('/people/delete', { id: '..' })).status).toBe(400);
+    });
+    it('needs the access token', async () => {
+      expect((await worker.fetch(new Request('https://w.test/people/delete', { method: 'POST', body: '{}' }), dEnv)).status).toBe(401);
+      expect((await worker.fetch(new Request('https://w.test/people/duplicates'), dEnv)).status).toBe(401);
+      expect((await worker.fetch(new Request('https://w.test/people/merge', { method: 'POST', body: '{}' }), dEnv)).status).toBe(401);
+    });
+  });
+
+  describe('duplicates', () => {
+    it('finds pairs by email, phone, LinkedIn, Telegram and name, strongest first, with a suggestion which to keep', async () => {
+      person('Jane Doe', { Email: { email: 'jane@acme.com' } });
+      person('J. Doe', { Email: { email: 'JANE@acme.com' }, Role: rich('CEO'), Phone: { phone_number: '+34 600 111 222' } });
+      person('Pedro Ruiz', { Phone: { phone_number: '600 111 222' } });
+      person('Lena Voss', { LinkedIn: { url: 'https://www.linkedin.com/in/lenavoss' } });
+      person('Elena V.', { LinkedIn: { url: 'https://linkedin.com/in/lenavoss/' } });
+      person('Tom Stark', { Telegram: { url: 'https://t.me/tomstark' } });
+      person('Thomas S', { Telegram: { url: 'https://t.me/TomStark' } });
+      person('Álvaro Durán');
+      person('Alvaro Duran Casares', { Role: rich('CTO') });
+      person('Sam Lee', { Email: { email: 'sam@a.com' } });
+      person('Sam Lee', { Email: { email: 'sam@b.com' } }); // same name, different emails: different people
+      const { pairs } = (await (await call('/people/duplicates')).json()) as { pairs: any[] };
+      const reasons = pairs.map((p) => `${p.a.name}+${p.b.name}:${p.reasons.join('&')}:${p.strength}`);
+      expect(reasons).toContain('Jane Doe+J. Doe:Same email:high');
+      expect(reasons.some((r) => r.startsWith('J. Doe+Pedro Ruiz') && r.includes('Same phone number'))).toBe(true);
+      expect(reasons.some((r) => r.includes('Same LinkedIn profile'))).toBe(true);
+      expect(reasons.some((r) => r.includes('Same Telegram'))).toBe(true);
+      expect(reasons.some((r) => r.includes('Álvaro Durán') && r.includes('Similar name') && r.endsWith('medium'))).toBe(true);
+      expect(reasons.some((r) => r.startsWith('Sam Lee+Sam Lee'))).toBe(false);
+      const jane = pairs.find((p) => p.reasons.includes('Same email'))!;
+      expect(jane[jane.keep].name).toBe('J. Doe'); // the one with more details
+      expect(pairs[0].strength).toBe('high');
+      expect(pairs.at(-1).strength).toBe('medium');
+    });
+  });
+
+  describe('merge', () => {
+    it('fills empty fields, moves links and notes, unions tags, and trashes the duplicate last', async () => {
+      const ev1 = notion.seed('events-db', { Name: title('MERGE Madrid') });
+      const ev2 = notion.seed('events-db', { Name: title('Web Summit') });
+      const co = notion.seed('companies-db', { Name: title('Acme') });
+      const keep = person('Jane Doe', { Email: { email: 'jane@acme.com' }, Notes: rich('2026-10-01: first note'), Events: { relation: [{ id: ev1.id }] }, 'Contact Type': { multi_select: [{ name: 'Peer' }] } });
+      const gone = person('J. Doe', { Phone: { phone_number: '+34 600' }, Email: { email: 'other@x.com' }, Role: rich('CEO'), Company: { relation: [{ id: co.id }] }, Events: { relation: [{ id: ev1.id }, { id: ev2.id }, { id: keep.id }] }, Notes: rich('2026-10-02: dup note'), 'Contact Type': { multi_select: [{ name: 'Client' }, { name: 'Peer' }] } });
+      const res = await call('/people/merge', { keep_id: keep.id, remove_id: gone.id, today: '2026-10-28' });
+      expect(res.status).toBe(200);
+      const { person: p } = (await res.json()) as any;
+      expect(p).toMatchObject({ name: 'Jane Doe', email: 'jane@acme.com', phone: '+34 600', role: 'CEO', company: 'Acme' });
+      expect(keep.properties.Events.relation.map((r: any) => r.id)).toEqual([ev1.id, ev2.id]);
+      expect(keep.properties['Contact Type'].multi_select.map((o: any) => o.name).sort()).toEqual(['Client', 'Peer']);
+      expect(p.notes).toContain('2026-10-01: first note');
+      expect(p.notes).toContain('Merged with duplicate "J. Doe"');
+      expect(p.notes).toContain('dup note');
+      expect(gone.archived).toBe(true);
+      expect(keep.archived).toBeFalsy();
+    });
+    it('refuses the same person twice and pages from other databases', async () => {
+      const a = person('A One');
+      const co = notion.seed('companies-db', { Name: title('Acme') });
+      expect((await call('/people/merge', { keep_id: a.id, remove_id: a.id })).status).toBe(400);
+      expect((await call('/people/merge', { keep_id: a.id, remove_id: co.id })).status).toBe(404);
+      expect(co.archived).toBeFalsy();
+    });
   });
 });

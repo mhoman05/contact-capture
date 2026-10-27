@@ -67,6 +67,15 @@ The **Recent** tab lists the last 100 people added to the CRM, newest first, wit
 - **Done with a follow-up:** *Followed up* clears the date and adds a "Followed up" note; *+7 days* / *+30 days* snooze it; untick *Needs review* once you have checked the person.
 - In Notion the same people are in **People → "Follow up due (reminder)"** (everyone whose Next Follow-up is today or earlier).
 
+## No signal, undo, phone contacts and duplicates
+
+- **Capture without signal.** If sending fails because there is no connection (or the service has a hiccup), the capture, photos included, is saved on the phone and a card *N captures waiting to send* appears at the top. It is sent by itself, in order, as soon as the app is open and online again (when the connection returns, when you open the app, and every 45 seconds while it is open); *Send now* does it on demand and *Show* lists what is waiting, each with *Remove*. Captures the service rejects (for example an unreadable email address) are not queued: you fix them and retry. Sending the same capture twice never creates a second person or a second meeting. Create a new event while you still have signal; the event list itself is remembered offline.
+- **Undo.** Right after adding someone, their result has **↩ Undo (remove)**: it moves the person, the meeting logged for them and the company page this capture created (only if nobody else uses it) to Notion's trash, where Notion keeps it for 30 days. Undo is offered for people who were *added*; for existing people who only got empty fields filled, edit them in *Recent*.
+- **Delete.** In *Recent*, open a person and tap **🗑 Delete person** (same trash, same 30 days).
+- **Save to phone contacts.** The result of a capture and the person screen in *Recent* have **📱 Save to phone contacts**. It opens the phone's share sheet with a contact file; choose *Contacts* and the usual "save contact" screen appears (if sharing files is not possible, the file is downloaded: open it to add the contact).
+- **Duplicates.** *Recent → Duplicates* suggests pairs that look like the same person: same email, phone number, LinkedIn or Telegram (strong), or the same or a similar name (people with different emails are never suggested by name). Each pair shows both people and suggests which to keep (the one with more details). **Keep this one** merges: the other person's details fill empty fields, their events, meetings, tasks and other links move over, their notes are appended, and they go to Notion's trash. **Different people** hides the pair on this phone. Nothing is ever merged without you tapping.
+  - Looking for duplicates reads your whole People table, so it can be slow with thousands of people, and on Cloudflare's free plan a very large table may hit the time limit. A few hundred people is fine.
+
 ## My QR card (sharing your own details)
 
 The **My QR card** tab turns your details into a QR code that the other person scans with their normal phone camera. Their phone offers **Add contact**, with no app, account or internet needed on their side.
@@ -105,7 +114,7 @@ The app itself is in GitHub and Cloudflare, and your contacts and details are in
 cd worker
 npm ci
 npm run typecheck
-npm test            # 68 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
+npm test            # 76 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
 ```
 
 Run everything locally with `npx wrangler@4 dev`, putting the three secrets in `worker/.dev.vars` (git-ignored), then open `http://127.0.0.1:8787/`.
