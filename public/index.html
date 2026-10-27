@@ -129,9 +129,7 @@ a{color:var(--accent)}
 <main>
   <section class="card hidden" id="setup">
     <h2>Settings</h2>
-    <p class="muted">The access token you chose is stored only on this phone. The service address is already filled in.</p>
-    <label for="wurl">Service address</label>
-    <input type="url" id="wurl" inputmode="url" autocomplete="off" placeholder="https://contact-capture.your-name.workers.dev">
+    <p class="muted">The access token you chose is stored only on this phone.</p>
     <label for="wtok">Access token</label>
     <input type="password" id="wtok" autocomplete="off">
     <div class="row" style="margin-bottom:6px"><button id="chk" type="button">Check Notion connections</button></div>
@@ -141,7 +139,6 @@ a{color:var(--accent)}
     <label class="check"><input type="checkbox" id="auto"><span>Send photos straight away when I share them<br><span class="muted">One step: share a photo and it is filed using the note and meeting tickbox as you last left them. Leave off to check first.</span></span></label>
     <div class="row" style="margin-top:12px">
       <button id="save" class="primary">Save</button>
-      <button id="test">Test connection</button>
     </div>
     <p class="muted" id="setupMsg" role="status"></p>
   </section>
@@ -322,7 +319,6 @@ a{color:var(--accent)}
       <div class="row hidden" id="qrActions" style="margin-top:12px">
         <button id="fullBtn" class="primary" style="flex-basis:100%">Show full screen</button>
         <button id="shareLink" class="primary">Share link</button>
-        <button id="shareVcf">Save contact file</button>
       </div>
       <p class="muted" id="shareMsg" role="status" style="margin:8px 0 0"></p>
       <details style="margin-top:8px"><summary class="muted" style="cursor:pointer;min-height:36px;display:flex;align-items:center">Show what is in the contact file</summary><pre id="qrFileText" class="muted" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;margin:6px 0 0"></pre></details>
@@ -539,42 +535,30 @@ a{color:var(--accent)}
   const state = { images: [], busy: false }; // images: {blob, url}
 
   // ---- settings ----------------------------------------------------------------
-  // A setup link like  https://your-worker.workers.dev/#t=token  fills the token in (add &w=… to also set the service address) and is then removed from the address bar.
+  // A setup link like  https://your-worker.workers.dev/#t=token  fills the token in and is then removed from the address bar.
   function importFromHash() {
     const p = new URLSearchParams(location.hash.slice(1));
-    if (!p.get('w') && !p.get('t')) return false;
-    if (p.get('w')) store.set('cc.url', p.get('w'));
+    if (!p.get('t')) return false;
     if (p.get('t')) store.set('cc.tok', p.get('t'));
     history.replaceState(null, '', location.pathname + location.search);
     return true;
   }
   importFromHash();
   window.addEventListener('hashchange', () => { if (importFromHash()) { showSetup(!configured()); refresh(); } });
-  // The app is served by the same Worker that does the work, so its own address is the default service address.
-  const cfg = () => ({ url: (store.get('cc.url') || location.origin).replace(/\/+$/, ''), tok: store.get('cc.tok') });
+  // The app is served by the same Worker that does the work, so its own address is the service address.
+  const cfg = () => ({ url: location.origin, tok: store.get('cc.tok') });
   const configured = () => !!(cfg().url && cfg().tok);
 
   function showSetup(show) {
     $('setup').classList.toggle('hidden', !show);
-    if (show) { $('wurl').value = cfg().url; $('wtok').value = cfg().tok; }
+    if (show) $('wtok').value = cfg().tok;
   }
   $('gear').onclick = () => showSetup($('setup').classList.contains('hidden'));
   $('save').onclick = () => {
-    const url = $('wurl').value.trim();
-    if (!/^https:\/\/[^\s/]+/.test(url)) { $('setupMsg').textContent = 'The address must start with https://'; return; }
-    store.set('cc.url', url);
     store.set('cc.tok', $('wtok').value.trim());
     $('setupMsg').textContent = 'Saved.';
     showSetup(false);
     refresh();
-  };
-  $('test').onclick = async () => {
-    const url = $('wurl').value.trim().replace(/\/+$/, '');
-    $('setupMsg').textContent = 'Testing…';
-    try {
-      const r = await fetch(url + '/health');
-      $('setupMsg').textContent = r.ok ? 'The service answers.' : 'The service answered with an error (' + r.status + ').';
-    } catch { $('setupMsg').textContent = 'Could not reach that address.'; }
   };
 
   // ---- inputs ------------------------------------------------------------------

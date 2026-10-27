@@ -7,7 +7,7 @@
     get(k, d = '') { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode: nothing to remember */ } },
   };
-  const cfg = () => ({ url: (store.get('cc.url') || location.origin).replace(/\/+$/, ''), tok: store.get('cc.tok') });
+  const cfg = () => ({ url: location.origin, tok: store.get('cc.tok') });
   const read = (k, d) => { try { return JSON.parse(store.get(k, 'null')) ?? d; } catch { return d; } };
   const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };

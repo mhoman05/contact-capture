@@ -69,13 +69,6 @@ async function lookups(d: PeopleDeps) {
   return { companies, events };
 }
 
-/** The people most recently added to the CRM, newest first. */
-export async function recentPeople(d: PeopleDeps, limit: number): Promise<PersonItem[]> {
-  const { companies, events } = await lookups(d);
-  const rows = await d.notion.recent(d.peopleDb, Math.min(Math.max(limit, 1), 100));
-  return rows.map((r) => toPerson(r, companies, events));
-}
-
 export interface PersonPatch {
   name?: string;
   company?: string;

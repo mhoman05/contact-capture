@@ -114,15 +114,6 @@ export class NotionClient {
     return this.request('POST', `/databases/${dbId}/query`, body);
   }
 
-  /** The most recently created rows, newest first (one page of results, at most 100). */
-  async recent(dbId: string, n: number): Promise<NotionPage[]> {
-    const res = await this.request<{ results: NotionPage[] }>('POST', `/databases/${dbId}/query`, {
-      sorts: [{ timestamp: 'created_time', direction: 'descending' }],
-      page_size: n,
-    });
-    return res.results;
-  }
-
   createPage(dbId: string, properties: Record<string, unknown>): Promise<NotionPage> {
     return this.request<NotionPage>('POST', '/pages', { parent: { database_id: dbId }, properties });
   }

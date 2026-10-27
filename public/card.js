@@ -11,7 +11,7 @@
     set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode: nothing to remember */ } },
   };
   const read = (k, d) => { try { return JSON.parse(store.get(k, 'null')) ?? d; } catch { return d; } };
-  const cfg = () => ({ url: (store.get('cc.url') || location.origin).replace(/\/+$/, ''), tok: store.get('cc.tok') });
+  const cfg = () => ({ url: location.origin, tok: store.get('cc.tok') });
 
   // A row added by hand in Notion may have no Type. Guess it from the value (an email, a link, a phone number) so it is not silently left out.
   const guessType = (v) => (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v) ? 'Email' : /^(https?:\/\/|www\.)\S+$/i.test(v) ? 'Website' : /^\+?[\d\s().-]{7,}$/.test(v) ? 'Phone' : '');
@@ -210,15 +210,6 @@
     } catch (e) { if (e && e.name === 'AbortError') return; }
     try { await navigator.clipboard.writeText(link); $('shareMsg').textContent = 'Link copied. Paste it into a message.'; }
     catch { window.prompt('Copy this link and send it:', link); }
-  };
-
-  async function vcfFile() { return new File([buildVCard()], ([val('First name'), val('Last name')].join('-')).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\W+/g, '-').replace(/^-|-$/g, '') + '.vcf', { type: 'text/vcard' }); }
-  $('shareVcf').onclick = async () => {
-    const f = await vcfFile();
-    try {
-      if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: 'My contact details' }); return; }
-    } catch (e) { if (e && e.name === 'AbortError') return; }
-    const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = f.name; document.body.append(a); a.click(); a.remove();
   };
 
   let wake = null;

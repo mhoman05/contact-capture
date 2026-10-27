@@ -6,7 +6,7 @@
   const store = {
     get(k, d = '') { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
   };
-  const cfg = () => ({ url: (store.get('cc.url') || location.origin).replace(/\/+$/, ''), tok: store.get('cc.tok') });
+  const cfg = () => ({ url: location.origin, tok: store.get('cc.tok') });
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
   // ---- IndexedDB ------------------------------------------------------------

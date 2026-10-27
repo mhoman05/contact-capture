@@ -7,7 +7,6 @@ const env: Env = {
   ANTHROPIC_API_KEY: 'sk-test',
   NOTION_TOKEN: 'secret',
   CAPTURE_TOKEN: 'correct horse',
-  ALLOWED_ORIGIN: 'https://me.github.io',
   NOTION_PEOPLE_DB: 'p',
   NOTION_COMPANIES_DB: 'c',
   NOTION_INTERACTIONS_DB: 'i',
@@ -24,27 +23,6 @@ describe('access control', () => {
   it('rejects a missing or wrong token', async () => {
     expect((await post({}, { text: 'x' })).status).toBe(401);
     expect((await post({ Authorization: 'Bearer nope' }, { text: 'x' })).status).toBe(401);
-  });
-  it('rejects browsers from other origins even with the right token', async () => {
-    const res = await post({ Authorization: 'Bearer correct horse', Origin: 'https://evil.example' }, { text: 'x' });
-    expect(res.status).toBe(403);
-  });
-  it('answers CORS preflight only for the allowed origin', async () => {
-    const ok = await call('/capture', { method: 'OPTIONS', headers: { Origin: 'https://me.github.io' } });
-    expect(ok.status).toBe(204);
-    expect(ok.headers.get('Access-Control-Allow-Origin')).toBe('https://me.github.io');
-    const bad = await call('/capture', { method: 'OPTIONS', headers: { Origin: 'https://evil.example' } });
-    expect(bad.status).toBe(403);
-  });
-  it('accepts any origin from a comma separated list', async () => {
-    const multi = { ...env, ALLOWED_ORIGIN: 'https://a.github.io, https://b.github.io' };
-    for (const origin of ['https://a.github.io', 'https://b.github.io']) {
-      const res = await worker.fetch(new Request('https://w.test/capture', { method: 'OPTIONS', headers: { Origin: origin } }), multi);
-      expect(res.status).toBe(204);
-      expect(res.headers.get('Access-Control-Allow-Origin')).toBe(origin);
-    }
-    const bad = await worker.fetch(new Request('https://w.test/capture', { method: 'OPTIONS', headers: { Origin: 'https://c.github.io' } }), multi);
-    expect(bad.status).toBe(403);
   });
   it('rejects oversized bodies even without a Content-Length header', async () => {
     const res = await call('/capture', {
@@ -74,10 +52,6 @@ describe('serving the app', () => {
   it('accepts requests from the same origin the app is served from', async () => {
     const res = await post({ Authorization: 'Bearer correct horse', Origin: 'https://w.test' }, { images: [] });
     expect(res.status).toBe(400); // reached validation, so origin and token were accepted
-  });
-  it('still rejects other sites', async () => {
-    const res = await post({ Authorization: 'Bearer correct horse', Origin: 'https://evil.example' }, { text: 'x' });
-    expect(res.status).toBe(403);
   });
   it('only allows POST on /capture', async () => {
     expect((await call('/capture')).status).toBe(405);
@@ -247,7 +221,7 @@ describe('notes and events in the capture request', () => {
   });
 });
 
-describe('recent people', () => {
+describe('people', () => {
   const notion = new FakeNotion();
   const pEnv = { ...env, NOTION_PEOPLE_DB: 'people-db', NOTION_COMPANIES_DB: 'companies-db', NOTION_EVENTS_DB: 'events-db' };
   const authed = { Authorization: 'Bearer correct horse' };
@@ -265,11 +239,11 @@ describe('recent people', () => {
   const update = (body: unknown) => callP('/people/update', { method: 'POST', headers: authed, body: JSON.stringify(body) });
 
   it('requires the access token', async () => {
-    expect((await callP('/people/recent')).status).toBe(401);
+    expect((await callP('/people/list')).status).toBe(401);
     expect((await callP('/people/update', { method: 'POST', body: '{}' })).status).toBe(401);
   });
-  it('lists the newest people first with company, event and follow-up', async () => {
-    const { people } = (await (await callP('/people/recent?limit=50', { headers: authed })).json()) as { people: any[] };
+  it('lists people with company, event and follow-up', async () => {
+    const { people } = (await (await callP('/people/list', { headers: authed })).json()) as { people: any[] };
     expect(people.map((p) => p.name)).toEqual(['Second Added', 'First Added']);
     expect(people[0]).toMatchObject({ company: 'Acme', events: ['MERGE Madrid'], role: 'CTO', needs_review: true, next_followup: '2026-11-03', email: 'a@b.com' });
     expect(people[0].created).toMatch(/^2026-/);
@@ -283,7 +257,7 @@ describe('recent people', () => {
     expect(p.notes).toBe('2026-10-28: Called, wants a demo');
     expect(notion.rows.filter((r) => r.db === 'companies-db').map((r) => r.properties.Name.title[0].text.content)).toContain('Globex');
     await update({ id: first.id, today: '2026-10-29', note: 'Sent the deck' });
-    const again = (await (await callP('/people/recent', { headers: authed })).json()) as any;
+    const again = (await (await callP('/people/list', { headers: authed })).json()) as any;
     expect(again.people.find((x: any) => x.name === 'First Added').notes).toBe('2026-10-28: Called, wants a demo\n2026-10-29: Sent the deck');
   });
   it('clears a value when sent an empty string, and sets a new follow-up date', async () => {

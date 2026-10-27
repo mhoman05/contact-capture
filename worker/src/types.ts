@@ -4,7 +4,6 @@ export interface Env {
   NOTION_TOKEN: string;
   CAPTURE_TOKEN: string;
   // Vars (wrangler.toml)
-  ALLOWED_ORIGIN: string;
   NOTION_PEOPLE_DB: string;
   NOTION_COMPANIES_DB: string;
   NOTION_INTERACTIONS_DB: string;
