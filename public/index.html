@@ -469,9 +469,9 @@ a{color:var(--accent)}
       <section class="card">
         <h2>Meetings and interactions</h2>
         <div id="pv-history"></div>
+        <button id="pv-log" type="button" style="margin-top:8px">＋ Log meeting or interaction</button>
       </section>
       <div class="row"><button class="primary" id="p-edit" type="button" style="flex:2">✎ Edit</button></div>
-      <div class="row"><button id="pv-log" type="button">＋ Log meeting or interaction</button></div>
       <p class="muted" id="p-vmsg" role="status" style="margin:0"></p>
       <div class="row"><button id="p-savephone" type="button">📱 Save to phone contacts</button><button id="p-delete" type="button" style="color:var(--bad)">🗑 Delete person</button></div>
     </div>
@@ -668,7 +668,7 @@ a{color:var(--accent)}
       links.append(a);
       if (r.details && window.CCVcard) {
         const sv = el('button', 'chip', '📱 Save to phone contacts'); sv.type = 'button';
-        sv.onclick = async () => { const m = await CCVcard.share([{ ...r.details, note: r.event ? 'Met at ' + r.event : '' }]); if (m) { sv.textContent = m; } };
+        sv.onclick = async () => { const m = await CCVcard.addToContacts({ ...r.details, note: r.event ? 'Met at ' + r.event : '' }); if (m) { sv.textContent = m; } };
         links.append(sv);
       }
       if (r.action === 'created' && r.person_id) {

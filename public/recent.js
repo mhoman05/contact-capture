@@ -285,7 +285,7 @@
   document.querySelectorAll('[data-snooze]').forEach((b) => { b.onclick = () => { $('p-follow').value = plusDays(Number(b.dataset.snooze)); }; });
   $('p-savephone').onclick = async () => {
     if (!current) return;
-    const m = await CCVcard.share([{ ...current, note: current.how || '' }]);
+    const m = await CCVcard.addToContacts({ ...current, note: current.how || '' });
     if (m) $('p-vmsg').textContent = m;
   };
   $('p-delete').onclick = async () => {

@@ -1,8 +1,8 @@
-// "Save to phone contacts": a contact file (vCard) for one or more people, handed to the phone's share sheet.
-// Choosing Contacts there opens the usual "save contact" screen; where sharing files is not possible the file is downloaded instead.
+// "Save to phone contacts". On Android, one person opens the Contacts app's "new contact" screen with the details filled in.
+// Otherwise (or if that does not open) a contact file (vCard) goes to the phone's share sheet; where sharing files is not possible it is downloaded.
 (() => {
   'use strict';
-  const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n').replace(/;/g, '\;').replace(/,/g, '\\,');
+  const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n').replace(/;/g, '\\;').replace(/,/g, '\\,');
 
   /** p: { name, company, role, phone, email, linkedin, telegram, note } */
   function one(p) {
@@ -36,5 +36,29 @@
     return 'Downloaded. Open the file to add the contact.';
   }
 
-  window.CCVcard = { make, one, share };
+  /** Android "create contact" screen, prefilled. p: as for one(). */
+  function intentUrl(p) {
+    const notes = [p.note, p.linkedin && 'LinkedIn: ' + p.linkedin, p.telegram && 'Telegram: ' + p.telegram].filter(Boolean).join('\n');
+    const extras = [['name', p.name], ['phone', p.phone], ['email', p.email], ['company', p.company], ['job_title', p.role], ['postal', p.location], ['notes', notes]]
+      .filter(([, v]) => v && String(v).trim());
+    return 'intent:#Intent;action=android.intent.action.INSERT;type=vnd.android.cursor.dir/contact;' + extras.map(([k, v]) => `S.${k}=${encodeURIComponent(String(v).trim())}`).join(';') + ';end';
+  }
+
+  /** Opens the new-contact screen; if the page is still in front a moment later (the phone did not open it), falls back to the share sheet. */
+  async function addToContacts(p) {
+    if (!p || !p.name) return 'Nothing to save.';
+    if (!/Android/i.test(navigator.userAgent)) return share([p]);
+    let left = false;
+    const gone = () => { left = true; };
+    document.addEventListener('visibilitychange', gone); window.addEventListener('pagehide', gone); window.addEventListener('blur', gone);
+    try {
+      const a = document.createElement('a'); a.href = intentUrl(p); document.body.append(a); a.click(); a.remove();
+      await new Promise((r) => setTimeout(r, 1500));
+    } finally {
+      document.removeEventListener('visibilitychange', gone); window.removeEventListener('pagehide', gone); window.removeEventListener('blur', gone);
+    }
+    return left ? '' : share([p]);
+  }
+
+  window.CCVcard = { make, one, share, intentUrl, addToContacts };
 })();
