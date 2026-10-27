@@ -44,6 +44,28 @@ Then:
 
 Changes to the files in `public/` alone do not trigger a deploy; after copying new files, open **Actions → Deploy worker → Run workflow** (branch `main`) to publish them.
 
+## Optional: Save to phone contacts (Google Contacts setup)
+
+One-time, about 15 minutes. It gives the service permission to add contacts to your Google account only (it cannot read other things). Keep every value below in your password manager and never paste them into a chat.
+
+**Part A, Google**
+
+1. Open console.cloud.google.com, sign in with the Google account your phone's Contacts use, accept the terms. Top left, open the project picker → *New project* → name it `Pocket CRM` → *Create*, and make sure it is selected.
+2. Menu (☰) → *APIs & Services* → *Library* → search **People API** → open it → *Enable*.
+3. Menu → *APIs & Services* → *OAuth consent screen* (it may be called *Google Auth Platform*) → *Get started*. App name `Pocket CRM`, support email yours → Next. Audience **External** → Next. Contact email yours → Next → tick the agreement → Continue → *Create*.
+4. In the left menu open *Audience* → **Publish app** → Confirm. (If you skip this the permission stops working after 7 days.)
+5. Left menu → *Clients* → *Create client*. Type **Web application**, name `Pocket CRM`. Under *Authorized redirect URIs* click *Add URI* and enter `https://developers.google.com/oauthplayground`. *Create*. A box shows the **Client ID** and **Client secret**; copy both.
+6. Open developers.google.com/oauthplayground. Click the gear (top right), tick **Use your own OAuth credentials**, paste the Client ID and Client secret, close the box.
+7. In the left list, scroll to the box **Input your own scopes**, type `https://www.googleapis.com/auth/contacts` and click *Authorize APIs*. Choose your account. On "Google hasn't verified this app" click *Advanced* → *Go to Pocket CRM (unsafe)* (it is your own app) → Continue → Allow.
+8. Back in the Playground, Step 2: click **Exchange authorization code for tokens** and copy the **Refresh token** (it starts with `1//`).
+
+**Part B, Cloudflare**
+
+9. dash.cloudflare.com → *Workers & Pages* → `contact-capture` → *Settings* → *Variables and Secrets* → *Add*. Type **Secret**. Add three, one at a time: `GOOGLE_CLIENT_ID` (the Client ID), `GOOGLE_CLIENT_SECRET` (the Client secret), `GOOGLE_REFRESH_TOKEN` (the refresh token). Click *Deploy* after the last one.
+10. In the app: People → open a person → **📱 Save to phone contacts**. After a moment the person is in your phone's Contacts. (Android's *Settings → Google → Contacts sync* must be on, which it normally is.)
+
+If the permission ever stops working (the app says Google refused it), repeat steps 6 to 9 and replace only `GOOGLE_REFRESH_TOKEN`.
+
 ## Using it
 
 - **At an event:** at the top of the Add screen, tap **Choose** next to *Event*. Pick one of your events from Notion (the ones closest to today are first, and you can search) or tap **＋ New event** (name, date, type, optional location; it is created in your Events database and selected). The event is remembered for 12 hours, so you set it once. **No event** clears it.
@@ -108,7 +130,7 @@ At the top of the **People** tab, the switch **People | Companies** shows your N
 - **Capture without signal.** If sending fails because there is no connection (or the service has a hiccup), the capture, photos included, is saved on the phone and a card *N captures waiting to send* appears at the top. It is sent by itself, in order, as soon as the app is open and online again (when the connection returns, when you open the app, and every 45 seconds while it is open); *Send now* does it on demand and *Show* lists what is waiting, each with *Remove*. Captures the service rejects (for example an unreadable email address) are not queued: you fix them and retry. Sending the same capture twice never creates a second person or a second meeting. Create a new event while you still have signal; the event list itself is remembered offline.
 - **Undo.** Right after adding someone, their result has **↩ Undo (remove)**: it moves the person, the meeting logged for them and the company page this capture created (only if nobody else uses it) to Notion's trash, where Notion keeps it for 30 days. Undo is offered for people who were *added*; for existing people who only got empty fields filled, edit them in *People*.
 - **Delete.** In *People*, open a person and tap **🗑 Delete person** (same trash, same 30 days).
-- **Save to phone contacts.** The result of a capture and the person screen in *People* have **📱 Save to phone contacts**. On Android it opens the Contacts app's **new contact screen** with name, phone, email, company, job title, address and a note (how you met, LinkedIn, Telegram) already filled in; you only tap Save. If the phone does not open that screen, or on another kind of phone, it falls back to the share sheet with a contact file (choose *Contacts*), or downloads the file as a last resort.
+- **Save to phone contacts.** The result of a capture and the person screen in *People* have **📱 Save to phone contacts**. It adds the person (name, company, role, phone, email, LinkedIn, Telegram, address, a note with how you met) to your **Google Contacts**, and Android syncs it to the phone's Contacts within a minute, so there is no file to open. A person who is already there (same email, same phone or same name) is not added twice. This needs the one-time Google setup below. Until then, or if Google is unreachable, the button falls back to a contact file: the share sheet (choose *Contacts*) or a download.
 - **Duplicates.** *People → Duplicates* suggests pairs that look like the same person: same email, phone number, LinkedIn or Telegram (strong), or the same or a similar name (people with different emails are never suggested by name). Each pair shows both people and suggests which to keep (the one with more details). **Keep this one** merges: the other person's details fill empty fields, their events, meetings, tasks and other links move over, their notes are appended, and they go to Notion's trash. **Different people** hides the pair on this phone. Nothing is ever merged without you tapping.
   - Looking for duplicates reads your whole People table, so it can be slow with thousands of people, and on Cloudflare's free plan a very large table may hit the time limit. A few hundred people is fine.
 
@@ -133,6 +155,7 @@ Nothing is stored only on the phone except the access token and your "send strai
 1. Install the app: open the Worker address (`https://contact-capture.matthias-homan.workers.dev`) in Chrome, then menu → **Install app**.
 2. Open `<that address>/#t=<your CAPTURE_TOKEN>` once. The token is saved on the phone and removed from the address bar. (Keep the token in a password manager. It is also in GitHub: repository → Settings → Secrets, though secrets can be replaced but not read; to get a new one, change `CAPTURE_TOKEN` there and re-run the deploy.)
 3. Open **My QR card**. Your details come back from Notion.
+4. Nothing to redo for *Save to phone contacts*: the Google permission lives in Cloudflare (the three `GOOGLE_…` secrets), not on the phone. Make sure the new phone is signed in to the same Google account.
 
 The app itself is in GitHub and Cloudflare, and your contacts and details are in Notion, so there is nothing else to restore.
 
@@ -140,6 +163,7 @@ The app itself is in GitHub and Cloudflare, and your contacts and details are in
 
 
 - Photos and text are sent to the Anthropic API to be read. The Worker keeps nothing; Notion keeps only the fields it extracted. Card photos themselves are not stored anywhere.
+- *Save to phone contacts* sends only the one person you tap to Google Contacts, using a permission limited to contacts that lives in Cloudflare as a secret. Revoke it any time at myaccount.google.com → Security → Third-party access.
 - The access token is stored in the phone's browser storage only. To rotate it, change the `CAPTURE_TOKEN` secret, re-run the workflow, and open a new setup link on the phone.
 - Reading one card costs roughly one US cent with the default model (`claude-opus-5-5`). Set `MODEL = "claude-sonnet-5-5"` in `worker/wrangler.toml` to make it cheaper.
 - Card text is treated as data: the instructions to Claude say to ignore any commands printed on a card, its reply is validated field by field, and the Worker can only write the fields listed above.

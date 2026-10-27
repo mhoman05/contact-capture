@@ -668,7 +668,7 @@ a{color:var(--accent)}
       links.append(a);
       if (r.details && window.CCVcard) {
         const sv = el('button', 'chip', '📱 Save to phone contacts'); sv.type = 'button';
-        sv.onclick = async () => { const m = await CCVcard.addToContacts({ ...r.details, note: r.event ? 'Met at ' + r.event : '' }); if (m) { sv.textContent = m; } };
+        sv.onclick = async () => { sv.textContent = 'Saving to Google Contacts…'; const m = await CCVcard.addToContacts({ ...r.details, note: r.event ? 'Met at ' + r.event : '' }); sv.textContent = m || '📱 Save to phone contacts'; };
         links.append(sv);
       }
       if (r.action === 'created' && r.person_id) {

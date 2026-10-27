@@ -285,8 +285,9 @@
   document.querySelectorAll('[data-snooze]').forEach((b) => { b.onclick = () => { $('p-follow').value = plusDays(Number(b.dataset.snooze)); }; });
   $('p-savephone').onclick = async () => {
     if (!current) return;
+    $('p-vmsg').textContent = 'Saving to Google Contacts…';
     const m = await CCVcard.addToContacts({ ...current, note: current.how || '' });
-    if (m) $('p-vmsg').textContent = m;
+    $('p-vmsg').textContent = m;
   };
   $('p-delete').onclick = async () => {
     if (!current || !confirm('Delete ' + current.name + '? They (and the meeting logged for them) go to Notion\'s trash, restorable there for 30 days.')) return;

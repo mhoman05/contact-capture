@@ -3,6 +3,9 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   NOTION_TOKEN: string;
   CAPTURE_TOKEN: string;
+  GOOGLE_CLIENT_ID?: string; // optional: Google Contacts ("Save to phone contacts"); see the README
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_REFRESH_TOKEN?: string;
   // Vars (wrangler.toml)
   NOTION_PEOPLE_DB: string;
   NOTION_COMPANIES_DB: string;

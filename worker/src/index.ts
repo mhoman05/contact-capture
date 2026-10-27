@@ -6,6 +6,7 @@ import { checkNotion } from './status';
 import { companyHistory, createCompany, listCompanies, parseCompanyFields, parseCompanyUpdate, updateCompany } from './companies';
 import { createTask, deleteTask, listTasks, parseTaskCreate, parseTaskUpdate, updateTask } from './tasks';
 import { vcardResponse } from './vcard';
+import { GoogleError, parseGoogleContact, saveToGoogle } from './google';
 import { createEvent, getEvent, listEvents, parseNewEvent } from './events';
 import { readMe, updateMeValue } from './me';
 import { deletePerson, findDuplicates, listPeople, mergePeople, parsePatch, personHistory, updatePersonFields } from './people';
@@ -125,6 +126,27 @@ async function handleMe(req: Request, env: Env, path: string): Promise<Response>
     return item ? json({ item }, 200) : json({ error: 'That row is not in My sharing details.' }, 404);
   } catch (err) {
     if (err instanceof NotionError) return json({ error: err.message }, err.status);
+    console.error(err);
+    return json({ error: 'Unexpected error.' }, 500);
+  }
+}
+
+/** "Save to phone contacts": adds one person to the owner's Google Contacts, which Android syncs to the phone. */
+async function handleGoogleContact(req: Request, env: Env): Promise<Response> {
+  const raw = await req.text();
+  if (raw.length > 20_000) return json({ error: 'Request too large.' }, 413);
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return json({ error: 'Body is not valid JSON.' }, 400);
+  }
+  const parsed = parseGoogleContact(body);
+  if (typeof parsed === 'string') return json({ error: parsed }, 400);
+  try {
+    return json(await saveToGoogle(env, parsed), 200);
+  } catch (err) {
+    if (err instanceof GoogleError) return json({ error: err.message }, err.status);
     console.error(err);
     return json({ error: 'Unexpected error.' }, 500);
   }
@@ -336,7 +358,7 @@ export default {
     // A contact card shared from "My QR": open to save the contact. Public, see vcard.ts.
     if (url.pathname === '/v') return req.method === 'GET' ? vcardResponse(url.searchParams.get('c'), url.searchParams.get('f') === '1') : json({ error: 'Use GET.' }, 405);
     // Everything else is a static file of the app.
-    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST', '/people/list': 'GET', '/people/history': 'GET', '/status': 'GET', '/tasks/list': 'GET', '/tasks/create': 'POST', '/tasks/update': 'POST', '/tasks/delete': 'POST', '/companies/list': 'GET', '/companies/history': 'GET', '/companies/create': 'POST', '/companies/update': 'POST', '/interactions/create': 'POST' };
+    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST', '/people/list': 'GET', '/people/history': 'GET', '/status': 'GET', '/tasks/list': 'GET', '/tasks/create': 'POST', '/tasks/update': 'POST', '/tasks/delete': 'POST', '/companies/list': 'GET', '/companies/history': 'GET', '/companies/create': 'POST', '/companies/update': 'POST', '/interactions/create': 'POST', '/contacts/google': 'POST' };
     const method = API[url.pathname];
     if (!method) {
       return env.ASSETS ? env.ASSETS.fetch(req) : json({ error: 'Not found.' }, 404);
@@ -353,6 +375,7 @@ export default {
     if (url.pathname === '/me' || url.pathname === '/me/update') return handleMe(req, env, url.pathname);
     if (url.pathname === '/status') return json(await checkNotion(new NotionClient(env.NOTION_TOKEN), env), 200);
     if (url.pathname === '/interactions/create') return handleLog(req, env);
+    if (url.pathname === '/contacts/google') return handleGoogleContact(req, env);
     if (url.pathname.startsWith('/companies/')) return handleCompanies(req, env, url);
     if (url.pathname.startsWith('/tasks/')) return handleTasks(req, env, url);
     if (url.pathname.startsWith('/people/')) return handlePeople(req, env, url);

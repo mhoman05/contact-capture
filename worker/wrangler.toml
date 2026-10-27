@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 [assets]
 directory = "../public"
 binding = "ASSETS"
-run_worker_first = ["/v", "/capture", "/me", "/me/update", "/events", "/events/create", "/people/update", "/people/delete", "/people/duplicates", "/people/merge", "/people/list", "/people/history", "/status", "/tasks/list", "/tasks/create", "/tasks/update", "/tasks/delete", "/companies/list", "/companies/history", "/companies/create", "/companies/update", "/interactions/create", "/health", "/share-target"]
+run_worker_first = ["/v", "/capture", "/me", "/me/update", "/events", "/events/create", "/people/update", "/people/delete", "/people/duplicates", "/people/merge", "/people/list", "/people/history", "/status", "/tasks/list", "/tasks/create", "/tasks/update", "/tasks/delete", "/companies/list", "/companies/history", "/companies/create", "/companies/update", "/interactions/create", "/contacts/google", "/health", "/share-target"]
 
 [vars]
 # Notion databases of the Work CRM (People, Companies, Interactions).
