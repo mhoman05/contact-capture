@@ -3,7 +3,7 @@ import { runCapture } from './capture';
 import { DEFAULT_MODEL, ExtractionError, extractContacts } from './extract';
 import { createEvent, getEvent, listEvents, parseNewEvent } from './events';
 import { readMe, updateMeValue } from './me';
-import { deletePerson, findDuplicates, mergePeople, parsePatch, recentPeople, updatePersonFields } from './people';
+import { deletePerson, findDuplicates, listPeople, mergePeople, parsePatch, personHistory, recentPeople, updatePersonFields } from './people';
 import { NotionClient, NotionError } from './notion';
 import { cleanEmail, cleanLinkedInLink, cleanPhone, cleanTelegram, cleanWebsite, nonEmpty } from './normalize';
 import type { CaptureImage, CaptureRequest, Env, ManualContact } from './types';
@@ -155,11 +155,24 @@ async function handlePeople(req: Request, env: Env, url: URL, cors: Record<strin
     peopleDb: env.NOTION_PEOPLE_DB,
     companiesDb: env.NOTION_COMPANIES_DB,
     eventsDb: env.NOTION_EVENTS_DB,
+    meetingsDb: env.NOTION_MEETINGS_DB,
+    interactionsDb: env.NOTION_INTERACTIONS_DB,
   };
   try {
     if (url.pathname === '/people/recent') {
       const n = Number(url.searchParams.get('limit') ?? '100');
       return json({ people: await recentPeople(deps, Number.isFinite(n) ? n : 100) }, 200, cors);
+    }
+    if (url.pathname === '/people/list') {
+      const since = url.searchParams.get('since') ?? undefined;
+      const cursor = url.searchParams.get('cursor') ?? undefined;
+      if ((since && Number.isNaN(Date.parse(since))) || (cursor && !/^[0-9A-Za-z-_%=.]{1,200}$/.test(cursor))) return json({ error: 'Bad since or cursor.' }, 400, cors);
+      return json(await listPeople(deps, { since, cursor }), 200, cors);
+    }
+    if (url.pathname === '/people/history') {
+      const pid = url.searchParams.get('id') ?? '';
+      if (!/^[0-9a-z-]{6,40}$/i.test(pid)) return json({ error: 'Send the id of the person.' }, 400, cors);
+      return json({ history: await personHistory(deps, pid) }, 200, cors);
     }
     if (url.pathname === '/people/duplicates') return json({ pairs: await findDuplicates(deps) }, 200, cors);
     const raw = await req.text();
@@ -230,7 +243,7 @@ export default {
     // Android posts shared files here; the app's service worker normally intercepts it. If it is not active yet, just open the app.
     if (url.pathname === '/share-target') return Response.redirect(new URL('/', url).href, 303);
     // Everything else is a static file of the app.
-    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/recent': 'GET', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST' };
+    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/recent': 'GET', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST', '/people/list': 'GET', '/people/history': 'GET' };
     const method = API[url.pathname];
     if (!method) {
       return env.ASSETS ? env.ASSETS.fetch(req) : json({ error: 'Not found.' }, 404, cors);

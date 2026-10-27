@@ -17,9 +17,12 @@ export interface PersonItem {
   how: string; // How We Know Each Other
   notes: string;
   events: string[];
+  tier: string; // A - Key, B - Important, C - Network or ''
+  contact_type: string[];
   needs_review: boolean;
   next_followup: string; // YYYY-MM-DD or ''
   created: string; // ISO time the person was added
+  edited: string; // ISO time of the last edit in Notion
 }
 
 export interface PeopleDeps {
@@ -27,7 +30,11 @@ export interface PeopleDeps {
   peopleDb: string;
   companiesDb: string;
   eventsDb?: string;
+  meetingsDb?: string;
+  interactionsDb?: string;
 }
+
+export const TIERS = ['A - Key', 'B - Important', 'C - Network'];
 
 export function toPerson(page: NotionPage, companies: Map<string, string>, events: Map<string, string>): PersonItem {
   const p = page.properties;
@@ -45,9 +52,12 @@ export function toPerson(page: NotionPage, companies: Map<string, string>, event
     how: plain(p['How We Know Each Other']).trim(),
     notes: plain(p.Notes).trim(),
     events: (p.Events?.relation ?? []).map((r: any) => events.get(r.id)).filter(Boolean) as string[],
+    tier: p.Tier?.select?.name ?? '',
+    contact_type: (p['Contact Type']?.multi_select ?? []).map((o: any) => o.name as string),
     needs_review: !!p['Needs review']?.checkbox,
     next_followup: (p['Next Follow-up']?.date?.start ?? '').slice(0, 10),
     created: page.created_time ?? '',
+    edited: page.last_edited_time ?? page.created_time ?? '',
   };
 }
 
@@ -78,6 +88,7 @@ export interface PersonPatch {
   note?: string;
   needs_review?: boolean;
   next_followup?: string;
+  tier?: string;
 }
 
 /** Validate an edit. Values that are given but unreadable are reported back instead of silently dropped; '' clears a field. */
@@ -113,6 +124,10 @@ export function parsePatch(raw: unknown): { id: string; patch: PersonPatch } | s
   cleaned('telegram', 'Telegram username', 100, cleanTelegram);
   const note = typeof o.note === 'string' ? nonEmpty(o.note, 1000) : null;
   if (note) patch.note = note;
+  if (typeof o.tier === 'string') {
+    if (o.tier === '' || TIERS.includes(o.tier)) patch.tier = o.tier;
+    else bad.push('tier');
+  }
   if (typeof o.needs_review === 'boolean') patch.needs_review = o.needs_review;
   if (typeof o.next_followup === 'string') {
     if (o.next_followup === '' || /^\d{4}-\d{2}-\d{2}$/.test(o.next_followup)) patch.next_followup = o.next_followup;
@@ -138,6 +153,7 @@ export async function updatePersonFields(d: PeopleDeps, id: string, patch: Perso
   if (patch.phone !== undefined) props.Phone = { phone_number: patch.phone || null };
   if (patch.linkedin !== undefined) props.LinkedIn = { url: patch.linkedin || null };
   if (patch.telegram !== undefined) props.Telegram = { url: patch.telegram || null };
+  if (patch.tier !== undefined) props.Tier = patch.tier ? P.select(patch.tier) : { select: null };
   if (patch.needs_review !== undefined) props['Needs review'] = P.checkbox(patch.needs_review);
   if (patch.next_followup !== undefined) props['Next Follow-up'] = { date: patch.next_followup ? { start: patch.next_followup } : null };
   if (patch.company !== undefined) {
@@ -319,4 +335,55 @@ export async function mergePeople(d: PeopleDeps, keepId: string, removeId: strin
   await d.notion.archivePage(removeId); // last, so a failure above loses nothing
   const { companies, events } = await lookups(d);
   return toPerson(updated, companies, events);
+}
+
+// ---- browsing the whole People database ---------------------------------------------------------
+
+// Company and event names change rarely and a sync reads many pages, so the name tables are kept for a minute.
+let cache: { at: number; value: Awaited<ReturnType<typeof lookups>> } | null = null;
+async function lookupsCached(d: PeopleDeps) {
+  if (cache && Date.now() - cache.at < 60_000) return cache.value;
+  const value = await lookups(d);
+  cache = { at: Date.now(), value };
+  return value;
+}
+
+/**
+ * One page (up to 100) of people, most recently edited first. With `since`, only people edited after that moment,
+ * so the app can keep its copy up to date cheaply and only read everything once.
+ */
+export async function listPeople(d: PeopleDeps, opts: { cursor?: string; since?: string }): Promise<{ people: PersonItem[]; next_cursor: string | null }> {
+  const { companies, events } = await lookupsCached(d);
+  const res = await d.notion.queryPage(d.peopleDb, {
+    page_size: 100,
+    sorts: [{ timestamp: 'last_edited_time', direction: 'descending' }],
+    ...(opts.since ? { filter: { timestamp: 'last_edited_time', last_edited_time: { after: opts.since } } } : {}),
+    ...(opts.cursor ? { start_cursor: opts.cursor } : {}),
+  });
+  return { people: res.results.map((r) => toPerson(r, companies, events)), next_cursor: res.has_more ? res.next_cursor : null };
+}
+
+export interface HistoryItem {
+  kind: 'meeting' | 'interaction';
+  title: string;
+  type: string;
+  date: string; // YYYY-MM-DD or ''
+  summary: string;
+  url: string;
+}
+
+/** Meetings (calendar) and interactions (calls, emails, events …) a person was part of, newest first. */
+export async function personHistory(d: PeopleDeps, personId: string): Promise<HistoryItem[]> {
+  const out: HistoryItem[] = [];
+  if (d.meetingsDb) {
+    for (const m of await d.notion.query(d.meetingsDb, { property: 'Attendees', relation: { contains: personId } }, 30)) {
+      out.push({ kind: 'meeting', title: pageTitle(m, 'Name'), type: m.properties.Type?.select?.name ?? 'Meeting', date: (m.properties.Date?.date?.start ?? '').slice(0, 10), summary: plain(m.properties['Topics Discussed']).trim(), url: m.url });
+    }
+  }
+  if (d.interactionsDb) {
+    for (const m of await d.notion.query(d.interactionsDb, { property: 'People', relation: { contains: personId } }, 30)) {
+      out.push({ kind: 'interaction', title: pageTitle(m, 'Title'), type: m.properties.Type?.select?.name ?? 'Interaction', date: (m.properties.Date?.date?.start ?? '').slice(0, 10), summary: plain(m.properties.Summary).trim(), url: m.url });
+    }
+  }
+  return out.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20);
 }

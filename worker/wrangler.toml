@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 [assets]
 directory = "../public"
 binding = "ASSETS"
-run_worker_first = ["/capture", "/me", "/me/update", "/events", "/events/create", "/people/recent", "/people/update", "/people/delete", "/people/duplicates", "/people/merge", "/health", "/share-target"]
+run_worker_first = ["/capture", "/me", "/me/update", "/events", "/events/create", "/people/recent", "/people/update", "/people/delete", "/people/duplicates", "/people/merge", "/people/list", "/people/history", "/health", "/share-target"]
 
 [vars]
 # Extra origins allowed to call the API from another site (comma separated). The Worker's own address is always allowed,
@@ -21,6 +21,8 @@ NOTION_INTERACTIONS_DB = "51d15aee672b41ebbe2fb1a948c23eca"
 NOTION_ME_DB = "535e69c9ee2540a08bc72c326786e5d1"
 # Events you meet people at (the Events database of the Work CRM).
 NOTION_EVENTS_DB = "f1680991265045f2b99752fa79148c2a"
+# Calendar meetings, shown in a person's history.
+NOTION_MEETINGS_DB = "6311b06337a4468bb661111f32c063b2"
 # MODEL = "claude-opus-5-5"   # optional override; this is the default
 
 # Secrets, never put these in this file: ANTHROPIC_API_KEY, NOTION_TOKEN, CAPTURE_TOKEN

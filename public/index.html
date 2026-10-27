@@ -62,6 +62,12 @@ button.icon{padding:0;width:44px}
 .trow .tnote{flex:1;min-width:0;display:grid;gap:4px}
 .trow .tnote label{margin:0;font-size:13px}
 .trow .rm{flex:none;min-height:36px;width:36px;padding:0;border-radius:50%}
+.letter{font-weight:700;padding:10px 4px 4px;position:sticky;top:52px;background:var(--card)}
+.kv{display:flex;gap:10px;padding:6px 0;border-top:1px solid var(--line)}
+.kv:first-child{border-top:0}
+.kv>span:first-child{flex:none;width:6.2em}
+.kv a{overflow-wrap:anywhere}
+select{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;min-height:44px;width:100%}
 .pair{border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:12px}
 .pair .who{padding:8px 0;border-top:1px solid var(--line)}
 .pair .who:first-of-type{border-top:0}
@@ -101,7 +107,7 @@ a{color:var(--accent)}
 
 <nav class="tabs" role="tablist">
   <button id="tabAdd" role="tab" aria-selected="true">Add</button>
-  <button id="tabRecent" role="tab" aria-selected="false">Recent</button>
+  <button id="tabRecent" role="tab" aria-selected="false">People</button>
   <button id="tabQr" role="tab" aria-selected="false">My QR</button>
 </nav>
 
@@ -208,10 +214,16 @@ a{color:var(--accent)}
         <button class="chip" type="button" data-f="due">Follow up</button>
         <button class="chip" type="button" data-f="dupes">Duplicates</button>
       </div>
-      <input type="text" id="recFilter" placeholder="Search name, company, note…" autocomplete="off">
-      <div id="recList" style="margin-top:10px"></div>
+      <input type="text" id="recFilter" placeholder="Search name, company, note, event…" autocomplete="off">
+      <div class="row" id="recTools" style="margin-top:8px">
+        <select id="recSort" aria-label="Sort"><option value="az">A–Z</option><option value="new">Newest first</option></select>
+        <select id="recTier" aria-label="Tier"><option value="">Any tier</option><option value="A - Key">Tier A</option><option value="B - Important">Tier B</option><option value="C - Network">Tier C</option><option value="none">No tier</option></select>
+      </div>
+      <p class="muted" id="recCount" style="margin:8px 0 0"></p>
+      <div id="recList" style="margin-top:6px"></div>
+      <button id="recMore" type="button" class="hidden" style="width:100%;margin-top:6px"></button>
       <div id="dupList" class="hidden" style="margin-top:10px"></div>
-      <div class="row" style="margin-top:6px"><button id="recReload" type="button">Reload from Notion</button></div>
+      <div class="row" style="margin-top:10px"><button id="recReload" type="button">Reload everything from Notion</button></div>
       <p class="muted" id="recStatus" role="status" style="margin:10px 0 0"></p>
     </section>
   </div>
@@ -251,35 +263,57 @@ a{color:var(--accent)}
 <div class="sheet hidden" id="personSheet" role="dialog" aria-label="Person">
   <div class="inner">
     <div class="row" style="align-items:center"><button id="p-close" type="button" style="flex:none">← Back</button><a id="p-notion" target="_blank" rel="noopener" style="flex:none;margin-left:auto">Open in Notion</a></div>
-    <section class="card">
-      <div id="p-actions" class="row" style="margin-bottom:6px"></div>
-      <p class="muted hidden" id="p-how" style="margin:6px 0 0"></p>
-      <label for="p-name">Name</label><input type="text" id="p-name" autocomplete="off">
-      <label for="p-company">Company</label><input type="text" id="p-company" autocomplete="off">
-      <label for="p-role">Role</label><input type="text" id="p-role" autocomplete="off">
-      <label for="p-phone-field">Phone</label><input type="text" id="p-phone-field" inputmode="tel" autocomplete="off">
-      <label for="p-email">Email</label><input type="text" id="p-email" inputmode="email" autocomplete="off">
-      <label for="p-linkedin">LinkedIn link</label><input type="text" id="p-linkedin" inputmode="url" autocomplete="off">
-      <label for="p-telegram">Telegram</label><input type="text" id="p-telegram" autocomplete="off">
-      <label for="p-location">Location</label><input type="text" id="p-location" autocomplete="off">
-    </section>
-    <section class="card">
-      <h2>Notes</h2>
-      <div id="p-notes" class="muted" style="white-space:pre-wrap;margin-bottom:6px"></div>
-      <label for="p-note">Add a note (saved with today's date)</label>
-      <input type="text" id="p-note" autocomplete="off" placeholder="Called, wants a demo next week…">
-    </section>
-    <section class="card">
-      <h2>Follow up</h2>
-      <label for="p-follow">Next follow-up date</label>
-      <input type="date" id="p-follow">
-      <div class="row" style="margin-top:8px"><button type="button" data-snooze="7">+7 days</button><button type="button" data-snooze="30">+30 days</button></div>
-      <button id="p-done" type="button" style="margin-top:8px;width:100%">✓ Followed up (clears the reminder)</button>
-      <label class="check"><input type="checkbox" id="p-review"><span>Needs review</span></label>
-    </section>
-    <button class="primary" id="p-save" type="button">Save to Notion</button>
-    <p class="muted" id="p-msg" role="status" style="margin:0"></p>
-    <div class="row"><button id="p-savephone" type="button">📱 Save to phone contacts</button><button id="p-delete" type="button" style="color:var(--bad)">🗑 Delete person</button></div>
+
+    <div id="pv" style="display:contents">
+      <section class="card">
+        <h2 id="pv-name" style="font-size:20px;margin:0"></h2>
+        <div class="muted" id="pv-sub"></div>
+        <div id="pv-tags" style="margin:6px 0"></div>
+        <div id="p-actions" class="row" style="margin:8px 0"></div>
+        <div id="pv-info"></div>
+      </section>
+      <section class="card">
+        <h2>Notes</h2>
+        <div id="p-notes" style="white-space:pre-wrap"></div>
+      </section>
+      <section class="card">
+        <h2>Meetings and interactions</h2>
+        <div id="pv-history"></div>
+      </section>
+      <div class="row"><button class="primary" id="p-edit" type="button" style="flex:2">✎ Edit</button></div>
+      <p class="muted" id="p-vmsg" role="status" style="margin:0"></p>
+      <div class="row"><button id="p-savephone" type="button">📱 Save to phone contacts</button><button id="p-delete" type="button" style="color:var(--bad)">🗑 Delete person</button></div>
+    </div>
+
+    <div id="pe" class="hidden" style="display:contents">
+      <section class="card">
+        <label for="p-name">Name</label><input type="text" id="p-name" autocomplete="off">
+        <label for="p-company">Company</label><input type="text" id="p-company" autocomplete="off">
+        <label for="p-role">Role</label><input type="text" id="p-role" autocomplete="off">
+        <label for="p-phone-field">Phone</label><input type="text" id="p-phone-field" inputmode="tel" autocomplete="off">
+        <label for="p-email">Email</label><input type="text" id="p-email" inputmode="email" autocomplete="off">
+        <label for="p-linkedin">LinkedIn link</label><input type="text" id="p-linkedin" inputmode="url" autocomplete="off">
+        <label for="p-telegram">Telegram</label><input type="text" id="p-telegram" autocomplete="off">
+        <label for="p-location">Location</label><input type="text" id="p-location" autocomplete="off">
+        <label for="p-tier">Tier (how often to stay in touch)</label>
+        <select id="p-tier"><option value="">No tier</option><option value="A - Key">A - Key (every 30 days)</option><option value="B - Important">B - Important (every 90 days)</option><option value="C - Network">C - Network (every 180 days)</option></select>
+      </section>
+      <section class="card">
+        <h2>Add a note</h2>
+        <input type="text" id="p-note" autocomplete="off" placeholder="Called, wants a demo next week…" aria-label="Add a note, saved with today's date">
+      </section>
+      <section class="card">
+        <h2>Follow up</h2>
+        <label for="p-follow">Next follow-up date</label>
+        <input type="date" id="p-follow">
+        <div class="row" style="margin-top:8px"><button type="button" data-snooze="7">+7 days</button><button type="button" data-snooze="30">+30 days</button></div>
+        <button id="p-done" type="button" style="margin-top:8px;width:100%">✓ Followed up (clears the reminder)</button>
+        <label class="check"><input type="checkbox" id="p-review"><span>Needs review</span></label>
+      </section>
+      <button class="primary" id="p-save" type="button">Save to Notion</button>
+      <button id="p-cancel" type="button">Cancel</button>
+      <p class="muted" id="p-msg" role="status" style="margin:0"></p>
+    </div>
   </div>
 </div>
 

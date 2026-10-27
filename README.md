@@ -57,23 +57,25 @@ Changes to the files in `public/` alone do not trigger a deploy; after copying n
 
 The app shrinks photos to 1600 px before sending, so uploads are small even on mobile data.
 
-## Recent: follow up on the people you added
+## People: your whole CRM on the phone
 
-The **Recent** tab lists the last 100 people added to the CRM, newest first, with filters **All**, **To review** and **Follow up**, and a search box (name, company, role, notes, event).
+The **People** tab shows everyone in your Notion People database: a list you can search (name, company, role, email, phone, notes, event; accents are ignored), sort (**A–Z** with letter headings, or **Newest first**), and filter (**To review**, **Follow up**, **Duplicates**, and by **tier**). It shows 100 at a time with *Show more*.
 
-- **Tap a name** to see everything about them and edit it: name, company, role, phone, email, LinkedIn, Telegram, location. Type a **note** and it is added to their Notes with today's date (earlier notes are kept). Everything saves straight to Notion; only the fields you changed are sent, and clearing a field empties it in Notion.
-- **Quick actions** appear for what you have: call, WhatsApp, email, Telegram, LinkedIn, and *Open in Notion*.
-- **Follow-up reminder:** every new person gets a *Next Follow-up* date 7 days ahead (change the number of days in ⚙ Settings; 0 turns it off). People already in the CRM never get their date changed. In the list, people whose date has come are marked *Follow up today* or *overdue*, the **Follow up** filter shows them oldest first, and the Recent tab shows their count (also as a badge on the app icon where Android allows it, updated whenever the app is opened).
-- **Done with a follow-up:** *Followed up* clears the date and adds a "Followed up" note; *+7 days* / *+30 days* snooze it; untick *Needs review* once you have checked the person.
+- **Tap a name** to reveal the details: phone, email, LinkedIn, Telegram, location, how you met, events, follow-up date, your notes, and the **meetings and interactions** logged for them (calendar meetings and calls, emails, events …), newest first. Quick buttons call, WhatsApp, email, or open Telegram and LinkedIn.
+- **✎ Edit** opens the editor: name, company, role, phone, email, LinkedIn, Telegram, location, **tier** (how often to stay in touch), a new note (added to *Notes* with today's date, earlier notes are kept), the follow-up date and *Needs review*. Everything saves straight to Notion, only the fields you changed are sent, and clearing a field empties it in Notion.
+- **Also on the details screen:** *Save to phone contacts*, *Delete person* (Notion's trash, restorable for 30 days) and *Open in Notion*.
+- **The phone keeps its own copy** of the list (IndexedDB). The first open reads everyone once (100 at a time, with a progress count); after that the app only asks for people edited since the last time, so opening the tab is quick. Once a day, and whenever you tap *Reload everything from Notion*, it reads everything again, which is also how people deleted directly in Notion disappear from the phone. Offline, the last copy is shown.
+- **Follow-up reminder:** every new person gets a *Next Follow-up* date 7 days ahead (change the number of days in ⚙ Settings; 0 turns it off). People already in the CRM never get their date changed. People whose date has come are marked *Follow up today* or *overdue*, the **Follow up** filter lists them oldest first, and the People tab shows their count (also as a badge on the app icon where Android allows it, updated whenever the app is opened).
+- **Done with a follow-up:** in the editor, *Followed up* clears the date and adds a "Followed up" note; *+7 days* / *+30 days* snooze it; untick *Needs review* once you have checked the person.
 - In Notion the same people are in **People → "Follow up due (reminder)"** (everyone whose Next Follow-up is today or earlier).
 
 ## No signal, undo, phone contacts and duplicates
 
 - **Capture without signal.** If sending fails because there is no connection (or the service has a hiccup), the capture, photos included, is saved on the phone and a card *N captures waiting to send* appears at the top. It is sent by itself, in order, as soon as the app is open and online again (when the connection returns, when you open the app, and every 45 seconds while it is open); *Send now* does it on demand and *Show* lists what is waiting, each with *Remove*. Captures the service rejects (for example an unreadable email address) are not queued: you fix them and retry. Sending the same capture twice never creates a second person or a second meeting. Create a new event while you still have signal; the event list itself is remembered offline.
-- **Undo.** Right after adding someone, their result has **↩ Undo (remove)**: it moves the person, the meeting logged for them and the company page this capture created (only if nobody else uses it) to Notion's trash, where Notion keeps it for 30 days. Undo is offered for people who were *added*; for existing people who only got empty fields filled, edit them in *Recent*.
-- **Delete.** In *Recent*, open a person and tap **🗑 Delete person** (same trash, same 30 days).
-- **Save to phone contacts.** The result of a capture and the person screen in *Recent* have **📱 Save to phone contacts**. It opens the phone's share sheet with a contact file; choose *Contacts* and the usual "save contact" screen appears (if sharing files is not possible, the file is downloaded: open it to add the contact).
-- **Duplicates.** *Recent → Duplicates* suggests pairs that look like the same person: same email, phone number, LinkedIn or Telegram (strong), or the same or a similar name (people with different emails are never suggested by name). Each pair shows both people and suggests which to keep (the one with more details). **Keep this one** merges: the other person's details fill empty fields, their events, meetings, tasks and other links move over, their notes are appended, and they go to Notion's trash. **Different people** hides the pair on this phone. Nothing is ever merged without you tapping.
+- **Undo.** Right after adding someone, their result has **↩ Undo (remove)**: it moves the person, the meeting logged for them and the company page this capture created (only if nobody else uses it) to Notion's trash, where Notion keeps it for 30 days. Undo is offered for people who were *added*; for existing people who only got empty fields filled, edit them in *People*.
+- **Delete.** In *People*, open a person and tap **🗑 Delete person** (same trash, same 30 days).
+- **Save to phone contacts.** The result of a capture and the person screen in *People* have **📱 Save to phone contacts**. It opens the phone's share sheet with a contact file; choose *Contacts* and the usual "save contact" screen appears (if sharing files is not possible, the file is downloaded: open it to add the contact).
+- **Duplicates.** *People → Duplicates* suggests pairs that look like the same person: same email, phone number, LinkedIn or Telegram (strong), or the same or a similar name (people with different emails are never suggested by name). Each pair shows both people and suggests which to keep (the one with more details). **Keep this one** merges: the other person's details fill empty fields, their events, meetings, tasks and other links move over, their notes are appended, and they go to Notion's trash. **Different people** hides the pair on this phone. Nothing is ever merged without you tapping.
   - Looking for duplicates reads your whole People table, so it can be slow with thousands of people, and on Cloudflare's free plan a very large table may hit the time limit. A few hundred people is fine.
 
 ## My QR card (sharing your own details)
@@ -114,7 +116,7 @@ The app itself is in GitHub and Cloudflare, and your contacts and details are in
 cd worker
 npm ci
 npm run typecheck
-npm test            # 76 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
+npm test            # 81 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
 ```
 
 Run everything locally with `npx wrangler@4 dev`, putting the three secrets in `worker/.dev.vars` (git-ignored), then open `http://127.0.0.1:8787/`.

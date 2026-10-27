@@ -210,7 +210,7 @@
     $('tabAdd').setAttribute('aria-selected', String(!qr && !recent));
     $('tabQr').setAttribute('aria-selected', String(qr));
     $('tabRecent').setAttribute('aria-selected', String(recent));
-    $('title').textContent = qr ? 'My QR card' : recent ? 'Recently added' : 'Add contact';
+    $('title').textContent = qr ? 'My QR card' : recent ? 'People' : 'Add contact';
     if (qr || recent) $('setup').classList.add('hidden');
     if (recent && window.CCRecent) CCRecent.show();
     if (qr) {

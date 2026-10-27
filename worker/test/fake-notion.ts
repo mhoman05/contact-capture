@@ -1,6 +1,6 @@
 // A tiny in-memory stand-in for the parts of the Notion API the worker uses.
 type Props = Record<string, any>;
-interface Row { id: string; db: string; properties: Props; archived?: boolean }
+interface Row { id: string; db: string; properties: Props; archived?: boolean; edited?: string }
 
 export class FakeNotion {
   rows: Row[] = [];
@@ -14,12 +14,13 @@ export class FakeNotion {
   }
 
   private page(row: Row) {
-    return { id: row.id, url: `https://notion.test/${row.id}`, properties: row.properties, parent: { type: 'database_id', database_id: row.db }, archived: !!row.archived, created_time: new Date(Date.UTC(2026, 9, 1) + Number(row.id.replace(/\D/g, '')) * 60000).toISOString() };
+    return { id: row.id, url: `https://notion.test/${row.id}`, properties: row.properties, parent: { type: 'database_id', database_id: row.db }, archived: !!row.archived, last_edited_time: row.edited ?? new Date(Date.UTC(2026, 9, 1) + Number(row.id.replace(/\D/g, '')) * 60000).toISOString(), created_time: new Date(Date.UTC(2026, 9, 1) + Number(row.id.replace(/\D/g, '')) * 60000).toISOString() };
   }
 
   private matches(row: Row, filter: any): boolean {
     if (!filter) return true;
     const prop = row.properties[filter.property];
+    if (filter.timestamp === 'last_edited_time') return (row.edited ?? new Date(Date.UTC(2026, 9, 1) + Number(row.id.replace(/\D/g, '')) * 60000).toISOString()) > filter.last_edited_time.after;
     if (filter.relation) return (prop?.relation ?? []).some((r: any) => r.id === filter.relation.contains);
     if (filter.email) return (prop?.email ?? null) === filter.email.equals;
     if (filter.url) return (prop?.url ?? '').includes(filter.url.contains);
@@ -40,7 +41,7 @@ export class FakeNotion {
     let m = url.pathname.match(/^\/v1\/databases\/([^/]+)\/query$/);
     if (m && method === 'POST') {
       let all = this.rows.filter((r) => r.db === m![1] && !r.archived && this.matches(r, body.filter));
-      if (body.sorts?.[0]?.timestamp === 'created_time' && body.sorts[0].direction === 'descending') all = [...all].reverse();
+      if (['created_time', 'last_edited_time'].includes(body.sorts?.[0]?.timestamp) && body.sorts[0].direction === 'descending') all = [...all].reverse();
       const start = body.start_cursor ? Number(body.start_cursor) : 0;
       const size = body.page_size ?? 100;
       const slice = all.slice(start, start + size);
@@ -58,6 +59,7 @@ export class FakeNotion {
     }
     if (m && method === 'PATCH') {
       const row = this.rows.find((r) => r.id === m![1])!;
+      row.edited = new Date().toISOString();
       if (body.archived) row.archived = true;
       if (body.properties) Object.assign(row.properties, this.normalise(body.properties));
       return ok(this.page(row));

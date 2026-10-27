@@ -415,3 +415,70 @@ describe('delete, duplicates and merge', () => {
     });
   });
 });
+
+describe('browsing people', () => {
+  const authed = { Authorization: 'Bearer correct horse' };
+  let notion: FakeNotion;
+  const bEnv = { ...env, NOTION_PEOPLE_DB: 'people-db', NOTION_COMPANIES_DB: 'companies-db', NOTION_INTERACTIONS_DB: 'interactions-db', NOTION_EVENTS_DB: 'events-db', NOTION_MEETINGS_DB: 'meetings-db' };
+  const call = (path: string, body?: unknown) => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((i: any, n: any) => notion.fetch(i, n)) as typeof fetch;
+    const init: RequestInit = body === undefined ? { headers: authed } : { method: 'POST', headers: authed, body: JSON.stringify(body) };
+    return worker.fetch(new Request(`https://w.test${path}`, init), bEnv).finally(() => (globalThis.fetch = realFetch));
+  };
+  beforeEach(() => { notion = new FakeNotion(); });
+
+  it('needs the access token', async () => {
+    expect((await worker.fetch(new Request('https://w.test/people/list'), bEnv)).status).toBe(401);
+    expect((await worker.fetch(new Request('https://w.test/people/history?id=abcdef'), bEnv)).status).toBe(401);
+  });
+
+  it('pages through every person, 100 at a time, with tier and tags', async () => {
+    for (let i = 0; i < 230; i++) notion.seed('people-db', { Name: title(`Person ${i}`), ...(i === 0 ? { Tier: { select: { name: 'A - Key' } }, 'Contact Type': { multi_select: [{ name: 'Client' }] } } : {}) });
+    const all: any[] = [];
+    let cursor: string | null = '';
+    let calls = 0;
+    while (cursor !== null) {
+      const res = await call(`/people/list${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
+      expect(res.status).toBe(200);
+      const data = (await res.json()) as { people: any[]; next_cursor: string | null };
+      all.push(...data.people);
+      cursor = data.next_cursor;
+      calls++;
+    }
+    expect(calls).toBe(3);
+    expect(new Set(all.map((p) => p.name)).size).toBe(230);
+    const first = all.find((p) => p.name === 'Person 0');
+    expect(first).toMatchObject({ tier: 'A - Key', contact_type: ['Client'] });
+    expect(first.edited).toMatch(/^2026-/);
+  });
+
+  it('with since, returns only people edited after it', async () => {
+    const a = notion.seed('people-db', { Name: title('Old Olga') });
+    const b = notion.seed('people-db', { Name: title('New Nils') });
+    a.edited = '2026-01-01T00:00:00.000Z';
+    b.edited = '2026-10-20T00:00:00.000Z';
+    const res = await call(`/people/list?since=${encodeURIComponent('2026-06-01T00:00:00.000Z')}`);
+    expect(((await res.json()) as any).people.map((p: any) => p.name)).toEqual(['New Nils']);
+    expect((await call('/people/list?since=yesterday-ish')).status).toBe(400);
+  });
+
+  it('shows meetings and interactions of one person, newest first', async () => {
+    const p = notion.seed('people-db', { Name: title('Jack R') });
+    notion.seed('meetings-db', { Name: title('Intro call'), Date: { date: { start: '2026-09-01' } }, Type: { select: { name: 'External' } }, 'Topics Discussed': rich('Pricing'), Attendees: { relation: [{ id: p.id }] } });
+    notion.seed('interactions-db', { Title: title('Met Jack R at MERGE'), Date: { date: { start: '2026-10-26' } }, Type: { select: { name: 'Event' } }, Summary: rich('Wants a demo'), People: { relation: [{ id: p.id }] } });
+    notion.seed('interactions-db', { Title: title('Somebody else'), Date: { date: { start: '2026-10-27' } }, People: { relation: [{ id: 'other' }] } });
+    const { history } = (await (await call(`/people/history?id=${p.id}`)).json()) as { history: any[] };
+    expect(history.map((h) => `${h.kind}:${h.title}:${h.date}`)).toEqual(['interaction:Met Jack R at MERGE:2026-10-26', 'meeting:Intro call:2026-09-01']);
+    expect(history[0]).toMatchObject({ type: 'Event', summary: 'Wants a demo' });
+    expect((await call('/people/history?id=..')).status).toBe(400);
+  });
+
+  it('sets and clears the tier from the app', async () => {
+    const p = notion.seed('people-db', { Name: title('Tier Tina'), Notes: rich('') });
+    const set = await call('/people/update', { id: p.id, tier: 'B - Important' });
+    expect(((await set.json()) as any).person.tier).toBe('B - Important');
+    expect(((await (await call('/people/update', { id: p.id, tier: '' })).json()) as any).person.tier).toBe('');
+    expect((await call('/people/update', { id: p.id, tier: 'Z' })).status).toBe(400);
+  });
+});

@@ -18,6 +18,7 @@ export interface NotionPage {
   properties: Record<string, any>;
   parent?: { type?: string; database_id?: string };
   created_time?: string;
+  last_edited_time?: string;
   archived?: boolean;
 }
 
@@ -86,6 +87,11 @@ export class NotionClient {
 
   getPage(pageId: string): Promise<NotionPage> {
     return this.request<NotionPage>('GET', `/pages/${pageId}`);
+  }
+
+  /** One page of a database query with any filter/sorts; returns Notion's cursor so callers can page. */
+  queryPage(dbId: string, body: Record<string, unknown>): Promise<{ results: NotionPage[]; has_more: boolean; next_cursor: string | null }> {
+    return this.request('POST', `/databases/${dbId}/query`, body);
   }
 
   /** The most recently created rows, newest first (one page of results, at most 100). */
