@@ -203,23 +203,27 @@
   // Tabs
   let loadedAt = 0;
   function tab(name) {
-    const qr = name === 'qr';
-    $('addView').classList.toggle('hidden', qr);
+    const qr = name === 'qr', recent = name === 'recent';
+    $('addView').classList.toggle('hidden', qr || recent);
     $('qrView').classList.toggle('hidden', !qr);
-    $('tabAdd').setAttribute('aria-selected', String(!qr));
+    $('recentView').classList.toggle('hidden', !recent);
+    $('tabAdd').setAttribute('aria-selected', String(!qr && !recent));
     $('tabQr').setAttribute('aria-selected', String(qr));
-    $('title').textContent = qr ? 'My QR card' : 'Add contact';
+    $('tabRecent').setAttribute('aria-selected', String(recent));
+    $('title').textContent = qr ? 'My QR card' : recent ? 'Recently added' : 'Add contact';
+    if (qr || recent) $('setup').classList.add('hidden');
+    if (recent && window.CCRecent) CCRecent.show();
     if (qr) {
-      $('setup').classList.add('hidden');
       render();
       if (Date.now() - loadedAt > 60000) { loadedAt = Date.now(); load(); } // fresh from Notion whenever you open it
     }
   }
   $('tabAdd').onclick = () => tab('add');
   $('tabQr').onclick = () => tab('qr');
+  $('tabRecent').onclick = () => tab('recent');
   $('gear').addEventListener('click', () => tab('add')); // settings live on the Add screen
   // A share (?shared=1) always opens "Add"; the home-screen shortcut opens the QR card.
   const q = new URLSearchParams(location.search);
-  tab(q.get('shared') ? 'add' : q.get('tab') === 'qr' ? 'qr' : 'add');
+  tab(q.get('shared') ? 'add' : q.get('tab') === 'qr' ? 'qr' : q.get('tab') === 'recent' ? 'recent' : 'add');
   if (q.get('tab')) history.replaceState(null, '', location.pathname);
 })();

@@ -246,3 +246,63 @@ describe('notes and events in the capture request', () => {
     expect(parseRequest({ images: [ok], event_id: '../../x' }, 'x')).toMatch(/event_id/);
   });
 });
+
+describe('recent people', () => {
+  const notion = new FakeNotion();
+  const pEnv = { ...env, NOTION_PEOPLE_DB: 'people-db', NOTION_COMPANIES_DB: 'companies-db', NOTION_EVENTS_DB: 'events-db' };
+  const authed = { Authorization: 'Bearer correct horse' };
+  const acme = notion.seed('companies-db', { Name: title('Acme') });
+  const ev = notion.seed('events-db', { Name: title('MERGE Madrid'), Date: { date: { start: '2026-10-26' } } });
+  const person = (name: string, extra: Record<string, unknown> = {}) => notion.seed('people-db', { Name: title(name), Notes: rich(''), ...extra });
+  const first = person('First Added');
+  const second = person('Second Added', { Company: { relation: [{ id: acme.id }] }, Events: { relation: [{ id: ev.id }] }, Role: rich('CTO'), 'Needs review': { checkbox: true }, 'Next Follow-up': { date: { start: '2026-11-03' } }, Email: { email: 'a@b.com' } });
+  const otherDb = notion.seed('events-db', { Name: title('Not a person') });
+  const callP = (path: string, init: RequestInit = {}) => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((i: any, n: any) => notion.fetch(i, n)) as typeof fetch;
+    return worker.fetch(new Request(`https://w.test${path}`, init), pEnv).finally(() => (globalThis.fetch = realFetch));
+  };
+  const update = (body: unknown) => callP('/people/update', { method: 'POST', headers: authed, body: JSON.stringify(body) });
+
+  it('requires the access token', async () => {
+    expect((await callP('/people/recent')).status).toBe(401);
+    expect((await callP('/people/update', { method: 'POST', body: '{}' })).status).toBe(401);
+  });
+  it('lists the newest people first with company, event and follow-up', async () => {
+    const { people } = (await (await callP('/people/recent?limit=50', { headers: authed })).json()) as { people: any[] };
+    expect(people.map((p) => p.name)).toEqual(['Second Added', 'First Added']);
+    expect(people[0]).toMatchObject({ company: 'Acme', events: ['MERGE Madrid'], role: 'CTO', needs_review: true, next_followup: '2026-11-03', email: 'a@b.com' });
+    expect(people[0].created).toMatch(/^2026-/);
+    expect(first.id).toBeTruthy();
+  });
+  it('edits fields, creates a company, appends a dated note and clears a follow-up', async () => {
+    const res = await update({ id: first.id, today: '2026-10-28', role: 'Head of Sales', company: 'Globex', phone: '0034 600 111 222', telegram: '@firstadded', note: 'Called, wants a demo', needs_review: false, next_followup: '' });
+    expect(res.status).toBe(200);
+    const { person: p } = (await res.json()) as any;
+    expect(p).toMatchObject({ role: 'Head of Sales', company: 'Globex', phone: '+34 600 111 222', telegram: 'https://t.me/firstadded', needs_review: false, next_followup: '' });
+    expect(p.notes).toBe('2026-10-28: Called, wants a demo');
+    expect(notion.rows.filter((r) => r.db === 'companies-db').map((r) => r.properties.Name.title[0].text.content)).toContain('Globex');
+    await update({ id: first.id, today: '2026-10-29', note: 'Sent the deck' });
+    const again = (await (await callP('/people/recent', { headers: authed })).json()) as any;
+    expect(again.people.find((x: any) => x.name === 'First Added').notes).toBe('2026-10-28: Called, wants a demo\n2026-10-29: Sent the deck');
+  });
+  it('clears a value when sent an empty string, and sets a new follow-up date', async () => {
+    const { person: p } = (await (await update({ id: second.id, email: '', company: '', next_followup: '2026-11-10' })).json()) as any;
+    expect(p).toMatchObject({ email: '', company: '', next_followup: '2026-11-10' });
+  });
+  it('refuses pages from other databases and bad values', async () => {
+    expect((await update({ id: otherDb.id, role: 'x' })).status).toBe(404);
+    expect((await update({ id: first.id, email: 'nope', phone: '1' })).status).toBe(400);
+    expect((await update({ id: first.id, name: '  ' })).status).toBe(400);
+    expect((await update({ id: first.id })).status).toBe(400);
+    expect((await update({ id: first.id, next_followup: 'tomorrow' })).status).toBe(400);
+  });
+});
+
+describe('follow-up date in the capture request', () => {
+  const ok = { media_type: 'image/jpeg', data: 'AAAA' };
+  it('accepts a sensible number of days only', () => {
+    expect((parseRequest({ images: [ok], follow_up_days: 7 }, 'x') as any).follow_up_days).toBe(7);
+    for (const bad of [0, -1, 1.5, 400, '7']) expect((parseRequest({ images: [ok], follow_up_days: bad }, 'x') as any).follow_up_days).toBeUndefined();
+  });
+});

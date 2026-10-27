@@ -49,6 +49,7 @@ export interface CaptureRequest {
   log_meeting: boolean; // also add an "In person" interaction dated today (photos and typed contacts only)
   manual?: ManualContact;
   event_id?: string; // the Notion Events page the people were met at
+  follow_up_days?: number; // new people get a Next Follow-up date this many days ahead (0 or absent: none)
 }
 
 export interface CaptureResult {

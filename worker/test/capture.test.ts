@@ -344,4 +344,14 @@ describe('events and per-contact notes', () => {
     expect(noteOf('Fay Six')).not.toContain('Knows the CTO');
     expect(res.results[0].warnings.join(' ')).toContain('photo 1: Knows the CTO; photo 2: Pricing');
   });
+
+  it('gives new people a follow-up date but never changes an existing one', async () => {
+    await runCapture(deps([contact()]), request({ follow_up_days: 7, today: '2026-10-28', log_meeting: false }));
+    expect(prop('Jane Doe', 'Next Follow-up').date.start).toBe('2026-11-04');
+    fake.rows.find((r) => r.db === PEOPLE)!.properties['Next Follow-up'] = { date: { start: '2026-12-24' } };
+    await runCapture(deps([contact({ phone: '+34 611 000 000' })]), request({ follow_up_days: 7, today: '2026-10-29', log_meeting: false }));
+    expect(prop('Jane Doe', 'Next Follow-up').date.start).toBe('2026-12-24');
+    await runCapture(deps([contact({ full_name: 'No Reminder', email: 'n@r.com', linkedin_url: null })]), request({ log_meeting: false }));
+    expect(prop('No Reminder', 'Next Follow-up')).toBeUndefined();
+  });
 });

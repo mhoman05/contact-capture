@@ -57,6 +57,16 @@ Changes to the files in `public/` alone do not trigger a deploy; after copying n
 
 The app shrinks photos to 1600 px before sending, so uploads are small even on mobile data.
 
+## Recent: follow up on the people you added
+
+The **Recent** tab lists the last 100 people added to the CRM, newest first, with filters **All**, **To review** and **Follow up**, and a search box (name, company, role, notes, event).
+
+- **Tap a name** to see everything about them and edit it: name, company, role, phone, email, LinkedIn, Telegram, location. Type a **note** and it is added to their Notes with today's date (earlier notes are kept). Everything saves straight to Notion; only the fields you changed are sent, and clearing a field empties it in Notion.
+- **Quick actions** appear for what you have: call, WhatsApp, email, Telegram, LinkedIn, and *Open in Notion*.
+- **Follow-up reminder:** every new person gets a *Next Follow-up* date 7 days ahead (change the number of days in ⚙ Settings; 0 turns it off). People already in the CRM never get their date changed. In the list, people whose date has come are marked *Follow up today* or *overdue*, the **Follow up** filter shows them oldest first, and the Recent tab shows their count (also as a badge on the app icon where Android allows it, updated whenever the app is opened).
+- **Done with a follow-up:** *Followed up* clears the date and adds a "Followed up" note; *+7 days* / *+30 days* snooze it; untick *Needs review* once you have checked the person.
+- In Notion the same people are in **People → "Follow up due (reminder)"** (everyone whose Next Follow-up is today or earlier).
+
 ## My QR card (sharing your own details)
 
 The **My QR card** tab turns your details into a QR code that the other person scans with their normal phone camera. Their phone offers **Add contact**, with no app, account or internet needed on their side.
@@ -95,7 +105,7 @@ The app itself is in GitHub and Cloudflare, and your contacts and details are in
 cd worker
 npm ci
 npm run typecheck
-npm test            # 61 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
+npm test            # 68 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
 ```
 
 Run everything locally with `npx wrangler@4 dev`, putting the three secrets in `worker/.dev.vars` (git-ignored), then open `http://127.0.0.1:8787/`.

@@ -17,6 +17,7 @@ export interface NotionPage {
   url: string;
   properties: Record<string, any>;
   parent?: { type?: string; database_id?: string };
+  created_time?: string;
 }
 
 export class NotionClient {
@@ -79,6 +80,15 @@ export class NotionClient {
 
   getPage(pageId: string): Promise<NotionPage> {
     return this.request<NotionPage>('GET', `/pages/${pageId}`);
+  }
+
+  /** The most recently created rows, newest first (one page of results, at most 100). */
+  async recent(dbId: string, n: number): Promise<NotionPage[]> {
+    const res = await this.request<{ results: NotionPage[] }>('POST', `/databases/${dbId}/query`, {
+      sorts: [{ timestamp: 'created_time', direction: 'descending' }],
+      page_size: n,
+    });
+    return res.results;
   }
 
   createPage(dbId: string, properties: Record<string, unknown>): Promise<NotionPage> {
@@ -191,6 +201,7 @@ export interface PersonInput {
   company: CompanyRef | null;
   note: string; // the user's note about this person
   event?: { id: string; name: string } | null; // the event they were met at
+  follow_up?: string | null; // Next Follow-up date for a new person (YYYY-MM-DD)
   today: string;
   source: string; // "business card", "email signature" ...
 }
@@ -225,6 +236,7 @@ export async function createPerson(notion: NotionClient, dbId: string, input: Pe
   if (input.event) set('Events', P.relation([input.event.id]), 'Event');
   const how = input.event ? `Met at ${input.event.name}` : input.note;
   if (how) set('How We Know Each Other', P.rich(how));
+  if (input.follow_up) props['Next Follow-up'] = P.date(input.follow_up); // new people only: an existing date is never touched
   props['Needs review'] = P.checkbox(true); // shows up in the "To review (captured)" view until you untick it
   props.Notes = P.rich([`Added from ${input.source} on ${input.today}.`, input.note, input.notes].filter(Boolean).join(' '));
   const page = await notion.createPage(dbId, props);

@@ -1,3 +1,4 @@
+import { addDays } from './people';
 import type { CaptureRequest, CaptureResult, ExtractedContact } from './types';
 import { createMeeting, createPerson, findOrCreateCompany, findPerson, updatePerson, NotionClient, pageTitle } from './notion';
 
@@ -53,6 +54,7 @@ export async function runCapture(deps: CaptureDeps, req: CaptureRequest): Promis
         company,
         note,
         event: deps.event ?? null,
+        follow_up: req.follow_up_days ? addDays(req.today, req.follow_up_days) : null,
         today: req.today,
         source,
       };

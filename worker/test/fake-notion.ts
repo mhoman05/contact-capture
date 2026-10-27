@@ -14,7 +14,7 @@ export class FakeNotion {
   }
 
   private page(row: Row) {
-    return { id: row.id, url: `https://notion.test/${row.id}`, properties: row.properties, parent: { type: 'database_id', database_id: row.db } };
+    return { id: row.id, url: `https://notion.test/${row.id}`, properties: row.properties, parent: { type: 'database_id', database_id: row.db }, created_time: new Date(Date.UTC(2026, 9, 1) + Number(row.id.replace(/\D/g, '')) * 60000).toISOString() };
   }
 
   private matches(row: Row, filter: any): boolean {
@@ -38,7 +38,8 @@ export class FakeNotion {
 
     let m = url.pathname.match(/^\/v1\/databases\/([^/]+)\/query$/);
     if (m && method === 'POST') {
-      const all = this.rows.filter((r) => r.db === m![1] && this.matches(r, body.filter));
+      let all = this.rows.filter((r) => r.db === m![1] && this.matches(r, body.filter));
+      if (body.sorts?.[0]?.timestamp === 'created_time' && body.sorts[0].direction === 'descending') all = [...all].reverse();
       const start = body.start_cursor ? Number(body.start_cursor) : 0;
       const size = body.page_size ?? 100;
       const slice = all.slice(start, start + size);

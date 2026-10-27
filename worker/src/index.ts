@@ -3,6 +3,7 @@ import { runCapture } from './capture';
 import { DEFAULT_MODEL, ExtractionError, extractContacts } from './extract';
 import { createEvent, getEvent, listEvents, parseNewEvent } from './events';
 import { readMe, updateMeValue } from './me';
+import { parsePatch, recentPeople, updatePersonFields } from './people';
 import { NotionClient, NotionError } from './notion';
 import { cleanEmail, cleanLinkedInLink, cleanPhone, cleanTelegram, cleanWebsite, nonEmpty } from './normalize';
 import type { CaptureImage, CaptureRequest, Env, ManualContact } from './types';
@@ -107,6 +108,7 @@ export function parseRequest(raw: unknown, fallbackToday: string): CaptureReques
     images.push({ media_type: i.media_type as CaptureImage['media_type'], data: i.data, ...(imgNote ? { note: imgNote } : {}) });
   }
   const text = typeof o.text === 'string' ? o.text.trim().slice(0, 8000) : '';
+  const followUp = typeof o.follow_up_days === 'number' && Number.isInteger(o.follow_up_days) && o.follow_up_days > 0 && o.follow_up_days <= 90 ? o.follow_up_days : 0;
   const eventId = typeof o.event_id === 'string' && o.event_id ? o.event_id : undefined;
   if (eventId && !/^[0-9a-z-]{6,40}$/i.test(eventId)) return 'event_id is not valid.';
   const manual = parseManual(o.contact);
@@ -117,7 +119,7 @@ export function parseRequest(raw: unknown, fallbackToday: string): CaptureReques
   // A meeting is only ever logged for photos or a typed contact (someone you are meeting), and only when asked for.
   // Text (an email signature) is never a meeting.
   const log_meeting = (images.length > 0 || !!manual) && o.log_meeting === true;
-  return { images, text, note, today, log_meeting, ...(manual ? { manual } : {}), ...(eventId ? { event_id: eventId } : {}) };
+  return { images, text, note, today, log_meeting, ...(manual ? { manual } : {}), ...(eventId ? { event_id: eventId } : {}), ...(followUp ? { follow_up_days: followUp } : {}) };
 }
 
 /** The details you may share about yourself (Notion database "My sharing details"). */
@@ -139,6 +141,39 @@ async function handleMe(req: Request, env: Env, path: string, cors: Record<strin
     }
     const item = await updateMeValue(notion, env.NOTION_ME_DB, body.id, body.value.trim().slice(0, 1900));
     return item ? json({ item }, 200, cors) : json({ error: 'That row is not in My sharing details.' }, 404, cors);
+  } catch (err) {
+    if (err instanceof NotionError) return json({ error: err.message }, err.status, cors);
+    console.error(err);
+    return json({ error: 'Unexpected error.' }, 500, cors);
+  }
+}
+
+/** The people list of the "Recent" tab: the latest additions, and edits to one person. */
+async function handlePeople(req: Request, env: Env, url: URL, cors: Record<string, string>): Promise<Response> {
+  const deps = {
+    notion: new NotionClient(env.NOTION_TOKEN),
+    peopleDb: env.NOTION_PEOPLE_DB,
+    companiesDb: env.NOTION_COMPANIES_DB,
+    eventsDb: env.NOTION_EVENTS_DB,
+  };
+  try {
+    if (url.pathname === '/people/recent') {
+      const n = Number(url.searchParams.get('limit') ?? '100');
+      return json({ people: await recentPeople(deps, Number.isFinite(n) ? n : 100) }, 200, cors);
+    }
+    const raw = await req.text();
+    if (raw.length > 20_000) return json({ error: 'Request too large.' }, 413, cors);
+    let body: unknown;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return json({ error: 'Body is not valid JSON.' }, 400, cors);
+    }
+    const parsed = parsePatch(body);
+    if (typeof parsed === 'string') return json({ error: parsed }, 400, cors);
+    const today = typeof (body as { today?: unknown }).today === 'string' && /^\d{4}-\d{2}-\d{2}$/.test((body as { today: string }).today) ? (body as { today: string }).today : new Date().toISOString().slice(0, 10);
+    const person = await updatePersonFields(deps, parsed.id, parsed.patch, today);
+    return person ? json({ person }, 200, cors) : json({ error: 'That person is not in your People database.' }, 404, cors);
   } catch (err) {
     if (err instanceof NotionError) return json({ error: err.message }, err.status, cors);
     console.error(err);
@@ -179,7 +214,7 @@ export default {
     // Android posts shared files here; the app's service worker normally intercepts it. If it is not active yet, just open the app.
     if (url.pathname === '/share-target') return Response.redirect(new URL('/', url).href, 303);
     // Everything else is a static file of the app.
-    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST' };
+    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/recent': 'GET', '/people/update': 'POST' };
     const method = API[url.pathname];
     if (!method) {
       return env.ASSETS ? env.ASSETS.fetch(req) : json({ error: 'Not found.' }, 404, cors);
@@ -196,6 +231,7 @@ export default {
     }
 
     if (url.pathname === '/me' || url.pathname === '/me/update') return handleMe(req, env, url.pathname, cors);
+    if (url.pathname === '/people/recent' || url.pathname === '/people/update') return handlePeople(req, env, url, cors);
     if (url.pathname === '/events' || url.pathname === '/events/create') return handleEvents(req, env, url.pathname, cors);
 
     const length = Number(req.headers.get('Content-Length') ?? '0');
