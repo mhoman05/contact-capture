@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pocket CRM privacy</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 40em; margin: 0 auto; padding: 16px; color: #1a1a1a; background: #fff; }
+  @media (prefers-color-scheme: dark) { body { color: #e8e8e8; background: #111; } }
+</style>
+</head>
+<body>
+<h1>Pocket CRM: privacy</h1>
+<p>Pocket CRM is a personal tool used by one person, its owner, to keep their own business contacts in their own Notion workspace. It is not offered to the public.</p>
+<h2>What the app does with data</h2>
+<ul>
+  <li>Contact details you add (from a photo, typed in or scanned) are written to the owner's Notion workspace. Photos and text are sent to the Anthropic API to be read and are not stored by the app.</li>
+  <li>When the owner taps "Save to phone contacts", that one person (name, company, role, phone, email, links, a short note) is added to the owner's own Google Contacts using the Google People API. The app only creates contacts. It does not read, change or delete other contacts, and it does not read any other Google data.</li>
+  <li>Nothing is sold, shared with third parties or used for advertising.</li>
+</ul>
+<h2>Where data lives</h2>
+<p>Contact data lives in Notion and in the owner's Google Contacts. The app's server (Cloudflare Workers) keeps no copy. The Google permission is stored as an encrypted secret in Cloudflare and can be revoked at any time at myaccount.google.com under Security, Third-party access.</p>
+</body>
+</html>
