@@ -221,27 +221,42 @@
   // Tabs
   let loadedAt = 0;
   function tab(name) {
-    const qr = name === 'qr', recent = name === 'recent';
-    $('addView').classList.toggle('hidden', qr || recent);
+    const qr = name === 'qr', recent = name === 'recent', tasks = name === 'tasks';
+    $('addView').classList.toggle('hidden', qr || recent || tasks);
     $('qrView').classList.toggle('hidden', !qr);
     $('recentView').classList.toggle('hidden', !recent);
-    $('tabAdd').setAttribute('aria-selected', String(!qr && !recent));
+    $('tasksView').classList.toggle('hidden', !tasks);
+    $('tabAdd').setAttribute('aria-selected', String(!qr && !recent && !tasks));
     $('tabQr').setAttribute('aria-selected', String(qr));
     $('tabRecent').setAttribute('aria-selected', String(recent));
-    $('title').textContent = qr ? 'My QR card' : recent ? 'People' : 'Add contact';
-    if (qr || recent) $('setup').classList.add('hidden');
+    $('tabTasks').setAttribute('aria-selected', String(tasks));
+    $('title').textContent = qr ? 'My QR card' : recent ? 'People' : tasks ? 'Tasks' : 'Add contact';
+    if (qr || recent || tasks) $('setup').classList.add('hidden');
     if (recent && window.CCRecent) CCRecent.show();
+    if (recent && window.CCCompanies) CCCompanies.show();
+    if (tasks && window.CCTasks) CCTasks.show();
     if (qr) {
       render();
       if (Date.now() - loadedAt > 60000) { loadedAt = Date.now(); load(); } // fresh from Notion whenever you open it
     }
+    window.scrollTo(0, 0);
   }
+  window.CCTab = tab;
+  // The number on the app icon: people to follow up plus tasks due, each tab reports its own count.
+  window.CCBadge = {
+    parts: {},
+    set(k, n) {
+      this.parts[k] = n; const total = Object.values(this.parts).reduce((a, b) => a + b, 0);
+      try { if (navigator.setAppBadge) (total ? navigator.setAppBadge(total) : navigator.clearAppBadge()).catch(() => {}); } catch { /* optional */ }
+    },
+  };
   $('tabAdd').onclick = () => tab('add');
   $('tabQr').onclick = () => tab('qr');
   $('tabRecent').onclick = () => tab('recent');
+  $('tabTasks').onclick = () => tab('tasks');
   $('gear').addEventListener('click', () => tab('add')); // settings live on the Add screen
   // A share (?shared=1) always opens "Add"; the home-screen shortcut opens the QR card.
   const q = new URLSearchParams(location.search);
-  tab(q.get('shared') ? 'add' : q.get('tab') === 'qr' ? 'qr' : q.get('tab') === 'recent' ? 'recent' : 'add');
+  tab(q.get('shared') ? 'add' : q.get('tab') === 'qr' ? 'qr' : q.get('tab') === 'recent' ? 'recent' : q.get('tab') === 'tasks' ? 'tasks' : 'add');
   if (q.get('tab')) history.replaceState(null, '', location.pathname);
 })();

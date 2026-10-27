@@ -8,7 +8,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<title>Contact capture</title>
+<title>Pocket CRM</title>
 <style>
 :root{
   --bg:#f5f6f3;--card:#fff;--ink:#1a2220;--mute:#65706b;--line:#e2e5e0;--soft:#eef1ed;
@@ -48,7 +48,7 @@ button.icon{padding:0;width:44px}
 .muted{color:var(--mute);font-size:14px}
 .hidden{display:none!important}
 .tabs{display:flex;gap:6px;max-width:560px;margin:12px auto 0;padding:0 16px}
-.tabs button{flex:1;border-radius:999px}
+.tabs button{flex:1;border-radius:999px;padding:8px 4px;font-size:14px;white-space:nowrap}
 .tabs button[aria-selected=true]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
 .item{padding:6px 0;border-top:1px solid var(--line)}
 .item:first-child{border-top:0}
@@ -62,6 +62,21 @@ button.icon{padding:0;width:44px}
 .trow .tnote{flex:1;min-width:0;display:grid;gap:4px}
 .trow .tnote label{margin:0;font-size:13px}
 .trow .rm{flex:none;min-height:36px;width:36px;padding:0;border-radius:50%}
+.seg{display:flex;gap:6px;margin-bottom:10px}
+.seg button{flex:1;padding:8px 6px;font-size:14px;border-radius:10px}
+.seg button[aria-pressed=true],.chips button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.task{display:flex;gap:12px;align-items:flex-start;padding:10px 4px;border-top:1px solid var(--line);cursor:pointer}
+.task:first-child{border-top:0}
+.task .tick{flex:none;width:30px;height:30px;min-height:30px;padding:0;border-radius:50%;border:2px solid var(--mute);background:transparent;font-weight:700}
+.task.done .tick{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.task.done .ttitle{text-decoration:line-through;color:var(--mute)}
+.task .tbody{flex:1;min-width:0}
+.task .ttitle{font-weight:600;overflow-wrap:anywhere}
+.late{color:var(--bad)!important}
+.resbox{display:grid;gap:4px;margin-top:6px}
+.resbox button{justify-content:flex-start;text-align:left}
+.toast{position:fixed;left:12px;right:12px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:30;background:#222;color:#fff;border-radius:12px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;max-width:536px;margin:0 auto}
+.toast button{background:transparent;color:#9fe3cf;border:0;font-weight:700;min-height:36px}
 .letter{font-weight:700;padding:10px 4px 4px;position:sticky;top:52px;background:var(--card)}
 .kv{display:flex;gap:10px;padding:6px 0;border-top:1px solid var(--line)}
 .kv:first-child{border-top:0}
@@ -108,6 +123,7 @@ a{color:var(--accent)}
 <nav class="tabs" role="tablist">
   <button id="tabAdd" role="tab" aria-selected="true">Add</button>
   <button id="tabRecent" role="tab" aria-selected="false">People</button>
+  <button id="tabTasks" role="tab" aria-selected="false">Tasks</button>
   <button id="tabQr" role="tab" aria-selected="false">My QR</button>
 </nav>
 
@@ -119,6 +135,8 @@ a{color:var(--accent)}
     <input type="url" id="wurl" inputmode="url" autocomplete="off" placeholder="https://contact-capture.your-name.workers.dev">
     <label for="wtok">Access token</label>
     <input type="password" id="wtok" autocomplete="off">
+    <div class="row" style="margin-bottom:6px"><button id="chk" type="button">Check Notion connections</button></div>
+    <div id="chkOut"></div>
     <label for="fu">Remind me to follow up after (days, 0 = no reminder)</label>
     <input type="text" id="fu" inputmode="numeric" style="max-width:8em" autocomplete="off">
     <label class="check"><input type="checkbox" id="auto"><span>Send photos straight away when I share them<br><span class="muted">One step: share a photo and it is filed using the note and meeting tickbox as you last left them. Leave off to check first.</span></span></label>
@@ -206,8 +224,70 @@ a{color:var(--accent)}
   <section class="card hidden" id="result" aria-live="polite"></section>
   </div>
 
-  <div id="recentView" class="hidden" style="display:contents">
+  <div id="tasksView" class="hidden" style="display:contents">
+    <section class="card" id="tkAdd">
+      <div class="row" style="align-items:center;flex-wrap:nowrap">
+        <input type="text" id="tkTitle" placeholder="Add a task…" autocomplete="off" enterkeyhint="done" style="flex:1;min-width:0">
+        <button class="primary" id="tkAddBtn" type="button" style="flex:none;width:auto;padding:0 18px">Add</button>
+      </div>
+      <div class="chips chipsrow" id="tkDue" style="margin-top:10px">
+        <button class="chip" type="button" data-d="today" aria-pressed="false">Today</button>
+        <button class="chip" type="button" data-d="tomorrow" aria-pressed="false">Tomorrow</button>
+        <button class="chip" type="button" data-d="week" aria-pressed="false">Next week</button>
+        <input type="date" id="tkDueDate" aria-label="Pick a due date" style="width:auto;min-height:32px;padding:2px 8px;font-size:13px">
+      </div>
+      <div class="chips chipsrow" id="tkTypes" style="margin-top:6px">
+        <button class="chip" type="button" data-t="Work" aria-pressed="false">Work</button>
+        <button class="chip" type="button" data-t="Personal" aria-pressed="false">Personal</button>
+        <button class="chip" type="button" data-t="Advisory" aria-pressed="false">Advisory</button>
+      </div>
+      <label class="check" style="margin-top:8px"><input type="checkbox" id="tkWaiting"><span>Waiting on someone else</span></label>
+      <input type="text" id="tkPersonSearch" placeholder="Link to a person (makes it a CRM task)" autocomplete="off" style="margin-top:8px">
+      <div id="tkPersonResults" class="resbox"></div>
+      <div id="tkPersonChips" class="chips"></div>
+      <p class="muted hidden" id="tkPersonHint" style="margin:6px 0 0">Without a person this task goes to My to-dos.</p>
+      <p class="muted" id="tkDueText" style="margin:6px 0 0"></p>
+    </section>
     <section class="card">
+      <div class="seg" id="tkSeg">
+        <button type="button" data-l="crm" aria-pressed="true">CRM tasks</button>
+        <button type="button" data-l="todo" aria-pressed="false">My to-dos</button>
+        <button type="button" data-l="follow" aria-pressed="false">Follow up</button>
+      </div>
+      <div class="chips chipsrow" id="tkFilters" style="margin:0 0 10px"></div>
+      <input type="text" id="tkSearch" placeholder="Search tasks…" autocomplete="off">
+      <div id="tkList" style="margin-top:6px"></div>
+      <div class="row" style="margin-top:10px"><button id="tkReload" type="button">Reload everything from Notion</button></div>
+      <p class="muted" id="tkStatus" role="status" style="margin:10px 0 0"></p>
+    </section>
+  </div>
+
+  <div id="recentView" class="hidden" style="display:contents">
+    <div class="seg" id="pmode" style="margin:0">
+      <button type="button" data-m="people" aria-pressed="true">People</button>
+      <button type="button" data-m="companies" aria-pressed="false">Companies</button>
+    </div>
+    <section class="card" id="compBox">
+      <div class="chips chipsrow" id="compChips" style="margin:0 0 10px">
+        <button class="chip" type="button" data-r="all" aria-pressed="true">All</button>
+        <button class="chip" type="button" data-r="Target" aria-pressed="false">Target</button>
+        <button class="chip" type="button" data-r="Prospect" aria-pressed="false">Prospect</button>
+        <button class="chip" type="button" data-r="Active" aria-pressed="false">Active</button>
+        <button class="chip" type="button" data-r="Partner" aria-pressed="false">Partner</button>
+        <button class="chip" type="button" data-r="Dormant" aria-pressed="false">Dormant</button>
+      </div>
+      <input type="text" id="compFilter" placeholder="Search companies…" autocomplete="off">
+      <div class="row" style="margin-top:8px">
+        <select id="compSort" aria-label="Sort"><option value="az">A–Z</option><option value="new">Newest first</option></select>
+        <button id="compNew" type="button">＋ New company</button>
+      </div>
+      <p class="muted" id="compCount" style="margin:8px 0 0"></p>
+      <div id="compList" style="margin-top:6px"></div>
+      <button id="compMore" type="button" class="hidden" style="width:100%;margin-top:6px"></button>
+      <div class="row" style="margin-top:10px"><button id="compReload" type="button">Reload everything from Notion</button></div>
+      <p class="muted" id="compStatus" role="status" style="margin:10px 0 0"></p>
+    </section>
+    <section class="card" id="peopleBox">
       <div class="chips chipsrow" id="recChips" style="margin:0 0 10px">
         <button class="chip" type="button" data-f="all" aria-pressed="true">All</button>
         <button class="chip" type="button" data-f="review">To review</button>
@@ -263,6 +343,79 @@ a{color:var(--accent)}
   </div>
 </main>
 
+<div class="sheet hidden" id="companySheet" role="dialog" aria-label="Company">
+  <div class="inner">
+    <div class="row" style="align-items:center"><button id="c-close" type="button" style="flex:none">← Back</button><a id="cv-notion" target="_blank" rel="noopener" style="flex:none;margin-left:auto">Open in Notion</a></div>
+    <div id="cv" style="display:contents">
+      <section class="card">
+        <h2 id="cv-name" style="font-size:20px;margin:0"></h2>
+        <div class="muted" id="cv-sub"></div>
+        <div id="cv-tags" style="margin:6px 0"></div>
+        <div id="cv-info"></div>
+      </section>
+      <section class="card"><h2>People here</h2><div id="cv-people"></div></section>
+      <section class="card"><h2>Open tasks</h2><div id="cv-tasks"></div></section>
+      <section class="card"><h2>Meetings and interactions</h2><div id="cv-history"></div></section>
+      <div class="row"><button class="primary" id="c-edit" type="button">✎ Edit</button></div>
+      <div class="row"><button id="c-addtask" type="button">＋ Add task</button><button id="c-addperson" type="button">＋ Add person</button></div>
+    </div>
+    <div id="ce" class="hidden" style="display:contents">
+      <section class="card">
+        <label for="c-name">Name</label><input type="text" id="c-name" autocomplete="off">
+        <label for="c-website">Website</label><input type="text" id="c-website" inputmode="url" autocomplete="off">
+        <label for="c-linkedin">LinkedIn link</label><input type="text" id="c-linkedin" inputmode="url" autocomplete="off">
+        <label for="c-location">HQ / location</label><input type="text" id="c-location" autocomplete="off">
+        <label for="c-industry">Industry</label>
+        <select id="c-industry"><option value="">—</option><option>Crypto / Web3</option><option>Fintech</option><option>Banking</option><option>Health</option><option>Software</option><option>Advisory</option><option>Other</option></select>
+        <label for="c-relationship">Relationship</label>
+        <select id="c-relationship"><option value="">—</option><option>Target</option><option>Prospect</option><option>Active</option><option>Partner</option><option>Dormant</option></select>
+        <label for="c-priority">Target priority</label>
+        <select id="c-priority"><option value="">—</option><option>High</option><option>Medium</option><option>Low</option></select>
+        <label for="c-why">Why they matter</label><textarea id="c-why"></textarea>
+        <label for="c-notes">Notes</label><textarea id="c-notes"></textarea>
+      </section>
+      <button class="primary" id="c-save" type="button">Save to Notion</button>
+      <button id="c-cancel" type="button">Cancel</button>
+      <p class="muted" id="c-msg" role="status" style="margin:0"></p>
+    </div>
+  </div>
+</div>
+
+<div class="sheet hidden" id="taskSheet" role="dialog" aria-label="Task">
+  <div class="inner">
+    <div class="row" style="align-items:center"><button id="ts-close" type="button" style="flex:none">← Back</button><a id="ts-notion" target="_blank" rel="noopener" style="flex:none;margin-left:auto">Open in Notion</a></div>
+    <section class="card">
+      <label for="ts-title">Task</label><input type="text" id="ts-title" autocomplete="off">
+      <label for="ts-status">Status</label>
+      <select id="ts-status"><option>Not started</option><option>In progress</option><option>Backlog</option><option>Done</option></select>
+      <label for="ts-due">Due date</label><input type="date" id="ts-due">
+      <div class="row" style="margin-top:8px"><button type="button" data-tsdue="today">Today</button><button type="button" data-tsdue="1">+1 day</button><button type="button" data-tsdue="7">+1 week</button><button type="button" data-tsdue="none">No date</button></div>
+      <label class="check"><input type="checkbox" id="ts-waiting"><span>Waiting on someone else</span></label>
+    </section>
+    <section class="card">
+      <h2>Linked people</h2>
+      <div id="ts-persons" class="chips"></div>
+      <input type="text" id="ts-person-search" placeholder="Add a person…" autocomplete="off" style="margin-top:8px">
+      <div id="ts-person-results" class="resbox"></div>
+      <p class="muted" id="ts-companies" style="margin:8px 0 0"></p>
+    </section>
+    <section class="card">
+      <h2>Type and tags</h2>
+      <div id="ts-types" class="chips chipsrow"></div>
+      <div id="ts-tags" class="chips chipsrow" style="margin-top:8px"></div>
+    </section>
+    <section class="card">
+      <label for="ts-notes" style="margin-top:0">Notes</label><textarea id="ts-notes"></textarea>
+      <label for="ts-next">Next step</label><input type="text" id="ts-next" autocomplete="off">
+    </section>
+    <button class="primary" id="ts-save" type="button">Save to Notion</button>
+    <div class="row"><button id="ts-done" type="button">✓ Done / reopen</button><button id="ts-delete" type="button" style="color:var(--bad)">🗑 Delete</button></div>
+    <p class="muted" id="ts-msg" role="status" style="margin:0"></p>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast" role="status"></div>
+
 <div class="sheet hidden" id="personSheet" role="dialog" aria-label="Person">
   <div class="inner">
     <div class="row" style="align-items:center"><button id="p-close" type="button" style="flex:none">← Back</button><a id="p-notion" target="_blank" rel="noopener" style="flex:none;margin-left:auto">Open in Notion</a></div>
@@ -278,6 +431,11 @@ a{color:var(--accent)}
       <section class="card">
         <h2>Notes</h2>
         <div id="p-notes" style="white-space:pre-wrap"></div>
+      </section>
+      <section class="card">
+        <h2>Open tasks</h2>
+        <div id="pv-tasks"></div>
+        <button id="pv-addtask" type="button" style="margin-top:8px">＋ Add task for this person</button>
       </section>
       <section class="card">
         <h2>Meetings and interactions</h2>
@@ -532,6 +690,8 @@ a{color:var(--accent)}
   function clearManual() { for (const k of MF) $('m-' + k).value = ''; fromQR = false; $('scanMsg').textContent = ''; $('manual').classList.add('hidden'); $('m-more').open = false; }
   $('manualBtn').onclick = () => showManual($('manual').classList.contains('hidden'));
   $('manualClear').onclick = () => { clearManual(); refresh(); };
+  // From a company's screen: open the typed form with the company filled in.
+  window.CCAddPerson = (fields) => { if (window.CCTab) CCTab('add'); showManual(true); for (const [k, v] of Object.entries(fields || {})) if ($('m-' + k)) $('m-' + k).value = v; refresh(); setTimeout(() => $('m-name').focus(), 50); };
   for (const k of MF) $('m-' + k).addEventListener('input', refresh);
 
   $('scanBtn').onclick = async () => {
@@ -619,7 +779,9 @@ a{color:var(--accent)}
 </script>
 <script src="card.js"></script>
 <script src="events.js"></script>
+<script src="tasks.js"></script>
 <script src="recent.js"></script>
+<script src="companies.js"></script>
 <script src="vcard.js"></script>
 <script src="queue.js"></script>
 </body>

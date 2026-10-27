@@ -1,6 +1,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { runCapture } from './capture';
 import { DEFAULT_MODEL, ExtractionError, extractContacts } from './extract';
+import { checkNotion } from './status';
+import { companyHistory, createCompany, listCompanies, parseCompanyFields, parseCompanyUpdate, updateCompany } from './companies';
+import { createTask, deleteTask, listTasks, parseTaskCreate, parseTaskUpdate, updateTask } from './tasks';
 import { vcardResponse } from './vcard';
 import { createEvent, getEvent, listEvents, parseNewEvent } from './events';
 import { readMe, updateMeValue } from './me';
@@ -211,6 +214,85 @@ async function handlePeople(req: Request, env: Env, url: URL, cors: Record<strin
   }
 }
 
+/** The Companies database: list (paged, incremental), history, create and change. */
+async function handleCompanies(req: Request, env: Env, url: URL, cors: Record<string, string>): Promise<Response> {
+  const deps = { notion: new NotionClient(env.NOTION_TOKEN), companiesDb: env.NOTION_COMPANIES_DB, interactionsDb: env.NOTION_INTERACTIONS_DB, meetingsDb: env.NOTION_MEETINGS_DB };
+  try {
+    if (url.pathname === '/companies/list') {
+      const since = url.searchParams.get('since') ?? undefined;
+      const cursor = url.searchParams.get('cursor') ?? undefined;
+      if ((since && Number.isNaN(Date.parse(since))) || (cursor && !/^[0-9A-Za-z-_%=.]{1,200}$/.test(cursor))) return json({ error: 'Bad since or cursor.' }, 400, cors);
+      return json(await listCompanies(deps, { since, cursor }), 200, cors);
+    }
+    if (url.pathname === '/companies/history') {
+      const cid = url.searchParams.get('id') ?? '';
+      if (!/^[0-9a-z-]{6,40}$/i.test(cid)) return json({ error: 'Send the id of the company.' }, 400, cors);
+      const history = await companyHistory(deps, cid);
+      return history ? json({ history }, 200, cors) : json({ error: 'That company is not in your Companies database.' }, 404, cors);
+    }
+    const raw = await req.text();
+    if (raw.length > 20_000) return json({ error: 'Request too large.' }, 413, cors);
+    let body: unknown;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return json({ error: 'Body is not valid JSON.' }, 400, cors);
+    }
+    if (url.pathname === '/companies/create') {
+      const f = parseCompanyFields((body ?? {}) as Record<string, unknown>, true);
+      return typeof f === 'string' ? json({ error: f }, 400, cors) : json(await createCompany(deps, f), 200, cors);
+    }
+    const p = parseCompanyUpdate(body);
+    if (typeof p === 'string') return json({ error: p }, 400, cors);
+    const company = await updateCompany(deps, p.id, p.fields);
+    return company ? json({ company }, 200, cors) : json({ error: 'That company is not in your Companies database.' }, 404, cors);
+  } catch (err) {
+    if (err instanceof NotionError) return json({ error: err.message }, err.status, cors);
+    console.error(err);
+    return json({ error: 'Unexpected error.' }, 500, cors);
+  }
+}
+
+/** The Task Database: list (paged, incremental), create, change (also completing) and delete. */
+async function handleTasks(req: Request, env: Env, url: URL, cors: Record<string, string>): Promise<Response> {
+  if (!env.NOTION_TASKS_DB) return json({ error: 'NOTION_TASKS_DB is not set.' }, 503, cors);
+  const deps = { notion: new NotionClient(env.NOTION_TOKEN), tasksDb: env.NOTION_TASKS_DB, companiesDb: env.NOTION_COMPANIES_DB };
+  try {
+    if (url.pathname === '/tasks/list') {
+      const since = url.searchParams.get('since') ?? undefined;
+      const cursor = url.searchParams.get('cursor') ?? undefined;
+      if ((since && Number.isNaN(Date.parse(since))) || (cursor && !/^[0-9A-Za-z-_%=.]{1,200}$/.test(cursor))) return json({ error: 'Bad since or cursor.' }, 400, cors);
+      return json(await listTasks(deps, { since, cursor }), 200, cors);
+    }
+    const raw = await req.text();
+    if (raw.length > 20_000) return json({ error: 'Request too large.' }, 413, cors);
+    let body: unknown;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return json({ error: 'Body is not valid JSON.' }, 400, cors);
+    }
+    const b = (body ?? {}) as Record<string, unknown>;
+    const today = typeof b.today === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.today) ? b.today : new Date().toISOString().slice(0, 10);
+    if (url.pathname === '/tasks/create') {
+      const f = parseTaskCreate(body);
+      return typeof f === 'string' ? json({ error: f }, 400, cors) : json({ task: await createTask(deps, f, today) }, 200, cors);
+    }
+    if (url.pathname === '/tasks/update') {
+      const p = parseTaskUpdate(body);
+      if (typeof p === 'string') return json({ error: p }, 400, cors);
+      const task = await updateTask(deps, p.id, p.fields, today);
+      return task ? json({ task }, 200, cors) : json({ error: 'That task is not in your Task Database.' }, 404, cors);
+    }
+    if (typeof b.id !== 'string' || !/^[0-9a-z-]{6,40}$/i.test(b.id)) return json({ error: 'Send the id of the task.' }, 400, cors);
+    return (await deleteTask(deps, b.id)) ? json({ ok: true }, 200, cors) : json({ error: 'That task is not in your Task Database.' }, 404, cors);
+  } catch (err) {
+    if (err instanceof NotionError) return json({ error: err.message }, err.status, cors);
+    console.error(err);
+    return json({ error: 'Unexpected error.' }, 500, cors);
+  }
+}
+
 /** The Events database: list the events to choose from, or create a new one. */
 async function handleEvents(req: Request, env: Env, path: string, cors: Record<string, string>): Promise<Response> {
   if (!env.NOTION_EVENTS_DB) return json({ error: 'NOTION_EVENTS_DB is not set.' }, 503, cors);
@@ -246,7 +328,7 @@ export default {
     // A contact card shared from "My QR": open to save the contact. Public, see vcard.ts.
     if (url.pathname === '/v') return req.method === 'GET' ? vcardResponse(url.searchParams.get('c')) : json({ error: 'Use GET.' }, 405);
     // Everything else is a static file of the app.
-    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/recent': 'GET', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST', '/people/list': 'GET', '/people/history': 'GET' };
+    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/recent': 'GET', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST', '/people/list': 'GET', '/people/history': 'GET', '/status': 'GET', '/tasks/list': 'GET', '/tasks/create': 'POST', '/tasks/update': 'POST', '/tasks/delete': 'POST', '/companies/list': 'GET', '/companies/history': 'GET', '/companies/create': 'POST', '/companies/update': 'POST' };
     const method = API[url.pathname];
     if (!method) {
       return env.ASSETS ? env.ASSETS.fetch(req) : json({ error: 'Not found.' }, 404, cors);
@@ -263,6 +345,9 @@ export default {
     }
 
     if (url.pathname === '/me' || url.pathname === '/me/update') return handleMe(req, env, url.pathname, cors);
+    if (url.pathname === '/status') return json({ databases: await checkNotion(new NotionClient(env.NOTION_TOKEN), env) }, 200, cors);
+    if (url.pathname.startsWith('/companies/')) return handleCompanies(req, env, url, cors);
+    if (url.pathname.startsWith('/tasks/')) return handleTasks(req, env, url, cors);
     if (url.pathname.startsWith('/people/')) return handlePeople(req, env, url, cors);
     if (url.pathname === '/events' || url.pathname === '/events/create') return handleEvents(req, env, url.pathname, cors);
 

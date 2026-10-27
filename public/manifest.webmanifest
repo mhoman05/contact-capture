@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Contact capture",
-  "short_name": "Capture",
-  "description": "Share a business card photo or email signature to add the person to the Notion CRM",
+  "name": "Pocket CRM",
+  "short_name": "Pocket CRM",
+  "description": "Your Notion CRM in your pocket: add people from a card photo, QR code or typing, follow up, share your contact card",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -41,6 +41,30 @@
     }
   },
   "shortcuts": [
+    {
+      "name": "Add a task",
+      "short_name": "Add task",
+      "url": "/?tab=tasks",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "People",
+      "short_name": "People",
+      "url": "/?tab=recent",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
     {
       "name": "My QR card",
       "short_name": "My QR",

@@ -375,13 +375,15 @@ export interface HistoryItem {
 /** Meetings (calendar) and interactions (calls, emails, events …) a person was part of, newest first. */
 export async function personHistory(d: PeopleDeps, personId: string): Promise<HistoryItem[]> {
   const out: HistoryItem[] = [];
+  // One source the app cannot see must not hide the other: show what is readable.
+  const safe = async (pages: Promise<NotionPage[]>): Promise<NotionPage[]> => pages.catch(() => []);
   if (d.meetingsDb) {
-    for (const m of await d.notion.query(d.meetingsDb, { property: 'Attendees', relation: { contains: personId } }, 30)) {
+    for (const m of await safe(d.notion.query(d.meetingsDb, { property: 'Attendees', relation: { contains: personId } }, 30))) {
       out.push({ kind: 'meeting', title: pageTitle(m, 'Name'), type: m.properties.Type?.select?.name ?? 'Meeting', date: (m.properties.Date?.date?.start ?? '').slice(0, 10), summary: plain(m.properties['Topics Discussed']).trim(), url: m.url });
     }
   }
   if (d.interactionsDb) {
-    for (const m of await d.notion.query(d.interactionsDb, { property: 'People', relation: { contains: personId } }, 30)) {
+    for (const m of await safe(d.notion.query(d.interactionsDb, { property: 'People', relation: { contains: personId } }, 30))) {
       out.push({ kind: 'interaction', title: pageTitle(m, 'Title'), type: m.properties.Type?.select?.name ?? 'Interaction', date: (m.properties.Date?.date?.start ?? '').slice(0, 10), summary: plain(m.properties.Summary).trim(), url: m.url });
     }
   }

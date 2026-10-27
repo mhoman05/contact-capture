@@ -1,4 +1,6 @@
-# Contact capture
+# Pocket CRM
+
+(The repository and the Worker are still called `contact-capture`; only the name you see changed.)
 
 Share a business card photo, a screenshot of an email signature or a LinkedIn profile, or just selected text, from your Android phone. Claude reads the details and files the person in your Notion Work CRM.
 
@@ -43,7 +45,7 @@ Changes to the files in `public/` alone do not trigger a deploy; after copying n
 ## Using it
 
 - **At an event:** at the top of the Add screen, tap **Choose** next to *Event*. Pick one of your events from Notion (the ones closest to today are first, and you can search) or tap **＋ New event** (name, date, type, optional location; it is created in your Events database and selected). The event is remembered for 12 hours, so you set it once. **No event** clears it.
-  - Take a photo of each card → *Share* → **Contact capture** → type a **note about this person** (optional: what you talked about, what to follow up) → *Add to CRM*. Tick *I met them in person* to also log a meeting today (an *Event* interaction named after the event).
+  - Take a photo of each card → *Share* → **Pocket CRM** → type a **note about this person** (optional: what you talked about, what to follow up) → *Add to CRM*. Tick *I met them in person* to also log a meeting today (an *Event* interaction named after the event).
   - Everyone you add is linked to the event (People → *Events*), and *How We Know Each Other* says "Met at <event>". People already in the CRM keep what they have; the event is added to their list of events. The note goes into their *Notes* and into the meeting summary. Fill in details in Notion later; new people are under *To review*. In Settings you can switch on "send straight away" so sharing a photo is the only step.
 - **Bulk after an event:** choose the event (or leave it empty), leave *I met them in person* unticked, share up to 12 cards at a time, and write a short note under each photo. Claude tells which person came from which photo; if it cannot tell, the notes are shown as a warning instead of being guessed. Review the people the same day in *To review (captured)*.
 - **No business card:** tap **Type it in** and enter name, company, phone, email (and under *More*: role, LinkedIn, Telegram, website). The event, the note and the *I met them in person* tickbox work the same as for photos. Nothing is sent to Claude, so it costs nothing; the person lands in Notion marked *Needs review*.
@@ -68,6 +70,35 @@ The **People** tab shows everyone in your Notion People database: a list you can
 - **Follow-up reminder:** every new person gets a *Next Follow-up* date 7 days ahead (change the number of days in ⚙ Settings; 0 turns it off). People already in the CRM never get their date changed. People whose date has come are marked *Follow up today* or *overdue*, the **Follow up** filter lists them oldest first, and the People tab shows their count (also as a badge on the app icon where Android allows it, updated whenever the app is opened).
 - **Done with a follow-up:** in the editor, *Followed up* clears the date and adds a "Followed up" note; *+7 days* / *+30 days* snooze it; untick *Needs review* once you have checked the person.
 - In Notion the same people are in **People → "Follow up due (reminder)"** (everyone whose Next Follow-up is today or earlier).
+
+## Tasks: your Notion Task Database on the phone
+
+The **Tasks** tab is your Notion *Task Database*. Two lists plus follow-ups:
+
+- **CRM tasks**: tasks linked to a person or a company (the same rule as your Notion view "CRM: open follow-ups").
+- **My to-dos**: tasks linked to nobody.
+- **Follow up**: the people whose follow-up date has come (from the People tab); tap one to open them.
+- **Filters** for the two task lists: *Today & overdue*, *This week*, *All open* (Not started and In progress), *Waiting on*, *Backlog* (parked, not counted as open) and *Done* (completed in the last 45 days). A search box looks at title, notes, next step, tags, companies and linked people. The tab shows how many tasks are due or overdue.
+- **Add a task in one line:** type it and press Enter. Optional: *Today / Tomorrow / Next week* or a date, *Work / Personal / Advisory*, *Waiting on someone else*, and **link to a person** (search the People list). Linking a person makes it a CRM task; without one it goes to My to-dos. New tasks start as *Not started*.
+- **Complete with one tap** (the circle). The completion date is set, and a message offers **Undo** for a few seconds. Tap a done task's circle to reopen it.
+- **Tap a task** to edit it: title, status (Not started, In progress, Backlog, Done), due date (+1 day, +1 week, no date), waiting on, linked people (tap a name to open the person), type, tags, notes, next step. *Delete* sends it to Notion's trash (restorable for 30 days).
+- **On a person's screen** (People tab) you see their open tasks and **＋ Add task for this person**.
+- **Without signal** everything still works: new tasks, completing and edits show at once and are sent in order when you are online again (a status line says how many are waiting). A task that Notion rejects is removed again with a message.
+- Sending the same new task twice (a lost reply, a retry) never creates it twice.
+- Changes you make in Notion show up the next time you open the tab: the phone keeps its own copy and asks only for what changed (everything again once a day, or with *Reload everything*).
+
+### Connecting Notion to the Task Database (one-time)
+
+Your Task Database lives under a different Notion page ("DATABASES") than the CRM, so the app's Notion connection may not see it yet. In the app open **⚙ → Check Notion connections**: it lists every database the app needs with ✓ or ✗. For each ✗: in Notion open that database (or its parent page), tap **•••** at the top right, choose **Connections** and add the app's connection (the same one you created for the CRM), then check again. The Meetings database (shown in a person's history) may need the same.
+
+## Companies (inside the People tab)
+
+At the top of the **People** tab, the switch **People | Companies** shows your Notion Companies database.
+
+- **List:** search (name, industry, location, notes), filter by **relationship** (Target, Prospect, Active, Partner, Dormant), sort A–Z or newest first, 100 at a time. Each row shows industry, location, relationship, priority and how many people work there. Like People, the phone keeps its own copy and only fetches what changed.
+- **Tap a company** for its details (website, LinkedIn, why it matters, notes), **People here** (tap one to open them), **Open tasks** (tasks linked to the company or to any of its people; tap to edit), and **meetings and interactions** of the company and its people, newest first.
+- **✎ Edit** changes name, website, LinkedIn, HQ / location, industry, relationship, target priority, why they matter and notes; empty values clear the field in Notion. **＋ New company** creates one; a company with the same name (ignoring Inc., Ltd, GmbH …) is never created twice, the existing one is opened instead.
+- **＋ Add task** opens the Tasks tab with the company already linked; **＋ Add person** opens the typed form with the company filled in. On a person's screen, the company name is a link to the company.
 
 ## No signal, undo, phone contacts and duplicates
 
@@ -116,7 +147,7 @@ The app itself is in GitHub and Cloudflare, and your contacts and details are in
 cd worker
 npm ci
 npm run typecheck
-npm test            # 83 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
+npm test            # 99 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
 ```
 
 Run everything locally with `npx wrangler@4 dev`, putting the three secrets in `worker/.dev.vars` (git-ignored), then open `http://127.0.0.1:8787/`.

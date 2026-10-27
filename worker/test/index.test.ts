@@ -512,3 +512,195 @@ describe('share link for the contact card', () => {
     expect((await get(b64(card), 'POST')).status).toBe(405);
   });
 });
+
+describe('tasks', () => {
+  const authed = { Authorization: 'Bearer correct horse' };
+  let notion: FakeNotion;
+  const tEnv = { ...env, NOTION_TASKS_DB: 'tasks-db', NOTION_COMPANIES_DB: 'companies-db', NOTION_PEOPLE_DB: 'people-db' };
+  const call = (path: string, body?: unknown) => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((i: any, n: any) => notion.fetch(i, n)) as typeof fetch;
+    const init: RequestInit = body === undefined ? { headers: authed } : { method: 'POST', headers: authed, body: JSON.stringify(body) };
+    return worker.fetch(new Request(`https://w.test${path}`, init), tEnv).finally(() => (globalThis.fetch = realFetch));
+  };
+  const task = (name: string, extra: Record<string, unknown> = {}) => notion.seed('tasks-db', { Name: title(name), Status: { status: { name: 'Not started' } }, ...extra });
+  beforeEach(() => { notion = new FakeNotion(); });
+
+  it('needs the access token', async () => {
+    for (const [path, method] of [['/tasks/list', 'GET'], ['/tasks/create', 'POST'], ['/tasks/update', 'POST'], ['/tasks/delete', 'POST'], ['/status', 'GET']]) {
+      expect((await worker.fetch(new Request(`https://w.test${path}`, { method, body: method === 'POST' ? '{}' : undefined }), tEnv)).status).toBe(401);
+    }
+  });
+
+  it('lists open tasks and recently edited ones, with company names, not old completed ones', async () => {
+    const co = notion.seed('companies-db', { Name: title('Acme') });
+    task('Open one', { 'Due Date': { date: { start: '2026-11-02' } }, Type: { multi_select: [{ name: 'Work' }] }, 'Waiting on': { checkbox: true }, 'Company (direct)': { relation: [{ id: co.id }] }, Person: { relation: [{ id: 'p-1' }] }, Notes: rich('call back') });
+    const doneRecent = task('Done recently', { Status: { status: { name: 'Done' } } });
+    const doneOld = task('Done long ago', { Status: { status: { name: 'Done' } } });
+    doneRecent.edited = new Date().toISOString();
+    doneOld.edited = '2025-01-01T00:00:00.000Z';
+    const { tasks } = (await (await call('/tasks/list')).json()) as { tasks: any[] };
+    expect(tasks.map((t) => t.title).sort()).toEqual(['Done recently', 'Open one']);
+    expect(tasks.find((t) => t.title === 'Open one')).toMatchObject({ status: 'Not started', due: '2026-11-02', types: ['Work'], waiting: true, companies: ['Acme'], person_ids: ['p-1'], notes: 'call back' });
+  });
+
+  it('with since returns only what changed, including tasks that were completed', async () => {
+    const a = task('Old');
+    const b = task('Changed', { Status: { status: { name: 'Done' } } });
+    a.edited = '2026-01-01T00:00:00.000Z';
+    b.edited = '2026-10-20T00:00:00.000Z';
+    const { tasks } = (await (await call(`/tasks/list?since=${encodeURIComponent('2026-06-01T00:00:00.000Z')}`)).json()) as any;
+    expect(tasks.map((t: any) => `${t.title}:${t.status}`)).toEqual(['Changed:Done']);
+    expect((await call('/tasks/list?since=never')).status).toBe(400);
+  });
+
+  it('creates a task with its links, and returns the existing one when the same task is sent twice', async () => {
+    const res = await call('/tasks/create', { title: ' Send the deck ', due: '2026-11-03', types: ['Work'], tags: ['Demos'], waiting: false, person_ids: ['page-123'], notes: 'v2 please' });
+    expect(res.status).toBe(200);
+    const { task: t } = (await res.json()) as any;
+    expect(t).toMatchObject({ title: 'Send the deck', status: 'Not started', due: '2026-11-03', types: ['Work'], tags: ['Demos'], person_ids: ['page-123'], notes: 'v2 please', completed: '' });
+    const again = (await (await call('/tasks/create', { title: 'Send the deck' })).json()) as any;
+    expect(again.task.id).toBe(t.id);
+    expect(notion.rows.filter((r) => r.db === 'tasks-db')).toHaveLength(1);
+  });
+
+  it('refuses bad input with a clear message', async () => {
+    const msg = async (body: unknown) => ((await (await call('/tasks/create', body)).json()) as any).error as string;
+    expect(await msg({})).toMatch(/title/);
+    expect(await msg({ title: 'x', due: 'tomorrow' })).toMatch(/due date/);
+    expect(await msg({ title: 'x', types: ['Fun'] })).toMatch(/task types/);
+    expect(await msg({ title: 'x', status: 'Doing' })).toMatch(/Status/);
+    expect(await msg({ title: 'x', person_ids: ['../..'] })).toMatch(/people/);
+    expect(await msg({ title: 'x', waiting: 'yes' })).toMatch(/Waiting/);
+  });
+
+  it('completes a task (date set), un-completes it (date cleared), and edits other fields', async () => {
+    const t = task('Call Jack', { 'Due Date': { date: { start: '2026-10-28' } } });
+    const done = (await (await call('/tasks/update', { id: t.id, status: 'Done', today: '2026-10-29' })).json()) as any;
+    expect(done.task).toMatchObject({ status: 'Done', completed: '2026-10-29', due: '2026-10-28' });
+    const undone = (await (await call('/tasks/update', { id: t.id, status: 'Not started' })).json()) as any;
+    expect(undone.task).toMatchObject({ status: 'Not started', completed: '' });
+    const edited = (await (await call('/tasks/update', { id: t.id, title: 'Call Jack R', due: '', waiting: true, person_ids: ['page-9'], next_step: 'ask about pricing' })).json()) as any;
+    expect(edited.task).toMatchObject({ title: 'Call Jack R', due: '', waiting: true, person_ids: ['page-9'], next_step: 'ask about pricing' });
+  });
+
+  it('only touches rows of the Task Database', async () => {
+    const person = notion.seed('people-db', { Name: title('Somebody') });
+    expect((await call('/tasks/update', { id: person.id, title: 'hacked' })).status).toBe(404);
+    expect((await call('/tasks/delete', { id: person.id })).status).toBe(404);
+    expect(person.archived).toBeFalsy();
+    expect((await call('/tasks/update', { id: person.id })).status).toBe(400);
+  });
+
+  it('deletes (trashes) a task and is safe to repeat', async () => {
+    const t = task('Remove me');
+    expect((await call('/tasks/delete', { id: t.id })).status).toBe(200);
+    expect(t.archived).toBe(true);
+    expect((await call('/tasks/delete', { id: t.id })).status).toBe(200);
+    const { tasks } = (await (await call('/tasks/list')).json()) as any;
+    expect(tasks).toHaveLength(0);
+  });
+
+  it('reports which databases the connection can see', async () => {
+    const real = notion.fetch;
+    notion.fetch = (async (input: any, init: any) => {
+      const u = new URL(String(input));
+      if (u.pathname === '/v1/databases/tasks-db') return new Response('{}', { status: 404 });
+      const m = u.pathname.match(/^\/v1\/databases\/([^/]+)$/);
+      if (m) return new Response(JSON.stringify({ id: m[1], title: [{ plain_text: `DB ${m[1]}` }], properties: {} }), { status: 200 });
+      return real(input, init);
+    }) as typeof fetch;
+    const { databases } = (await (await call('/status')).json()) as { databases: any[] };
+    const tasks = databases.find((d) => d.name === 'Tasks');
+    expect(tasks.ok).toBe(false);
+    expect(tasks.error).toMatch(/Connections/);
+    expect(databases.find((d) => d.name === 'People')).toMatchObject({ ok: true, title: 'DB people-db' });
+  });
+});
+
+describe('history when a source is not connected', () => {
+  it('still shows the readable one', async () => {
+    const authed = { Authorization: 'Bearer correct horse' };
+    const notion = new FakeNotion();
+    const person = notion.seed('people-db', { Name: title('Jack R') });
+    notion.seed('interactions-db', { Title: title('Met Jack R'), Date: { date: { start: '2026-10-26' } }, People: { relation: [{ id: person.id }] } });
+    const real = notion.fetch;
+    notion.fetch = (async (input: any, init: any) => (String(input).includes('/databases/meetings-db/') ? new Response('{}', { status: 404 }) : real(input, init))) as typeof fetch;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((i: any, n: any) => notion.fetch(i, n)) as typeof fetch;
+    const res = await worker.fetch(new Request(`https://w.test/people/history?id=${person.id}`, { headers: authed }), { ...env, NOTION_PEOPLE_DB: 'people-db', NOTION_INTERACTIONS_DB: 'interactions-db', NOTION_MEETINGS_DB: 'meetings-db' }).finally(() => (globalThis.fetch = realFetch));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as any).history.map((h: any) => h.title)).toEqual(['Met Jack R']);
+  });
+});
+
+describe('companies', () => {
+  const authed = { Authorization: 'Bearer correct horse' };
+  let notion: FakeNotion;
+  const cEnv = { ...env, NOTION_COMPANIES_DB: 'companies-db', NOTION_INTERACTIONS_DB: 'interactions-db', NOTION_MEETINGS_DB: 'meetings-db', NOTION_PEOPLE_DB: 'people-db' };
+  const call = (path: string, body?: unknown) => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((i: any, n: any) => notion.fetch(i, n)) as typeof fetch;
+    const init: RequestInit = body === undefined ? { headers: authed } : { method: 'POST', headers: authed, body: JSON.stringify(body) };
+    return worker.fetch(new Request(`https://w.test${path}`, init), cEnv).finally(() => (globalThis.fetch = realFetch));
+  };
+  const company = (name: string, extra: Record<string, unknown> = {}) => notion.seed('companies-db', { Name: title(name), ...extra });
+  beforeEach(() => { notion = new FakeNotion(); });
+
+  it('needs the access token', async () => {
+    for (const [path, method] of [['/companies/list', 'GET'], ['/companies/history?id=abcdef', 'GET'], ['/companies/create', 'POST'], ['/companies/update', 'POST']]) {
+      expect((await worker.fetch(new Request(`https://w.test${path}`, { method, body: method === 'POST' ? '{}' : undefined }), cEnv)).status).toBe(401);
+    }
+  });
+
+  it('lists companies with their fields and people, and only what changed with since', async () => {
+    const a = company('Acme Inc', { Website: { url: 'https://acme.com' }, Industry: { select: { name: 'Fintech' } }, Relationship: { select: { name: 'Target' } }, 'Target Priority': { select: { name: 'High' } }, 'HQ / Location': rich('Madrid'), 'Why They Matter': rich('Big buyer'), People: { relation: [{ id: 'p1' }, { id: 'p2' }] } });
+    const b = company('Old Corp');
+    a.edited = '2026-10-20T00:00:00.000Z';
+    b.edited = '2026-01-01T00:00:00.000Z';
+    const all = (await (await call('/companies/list')).json()) as any;
+    expect(all.companies.find((c: any) => c.name === 'Acme Inc')).toMatchObject({ website: 'https://acme.com', industry: 'Fintech', relationship: 'Target', priority: 'High', location: 'Madrid', why: 'Big buyer', people_ids: ['p1', 'p2'] });
+    const since = (await (await call(`/companies/list?since=${encodeURIComponent('2026-06-01T00:00:00.000Z')}`)).json()) as any;
+    expect(since.companies.map((c: any) => c.name)).toEqual(['Acme Inc']);
+  });
+
+  it('creates a company, but returns an existing one with the same name (ignoring Inc., Ltd)', async () => {
+    const res = await call('/companies/create', { name: ' Globex GmbH ', website: 'globex.com', industry: 'Software', relationship: 'Prospect' });
+    const made = (await res.json()) as any;
+    expect(made.existed).toBe(false);
+    expect(made.company).toMatchObject({ name: 'Globex GmbH', website: 'https://globex.com', industry: 'Software', relationship: 'Prospect' });
+    const again = (await (await call('/companies/create', { name: 'Globex' })).json()) as any;
+    expect(again.existed).toBe(true);
+    expect(again.company.id).toBe(made.company.id);
+    expect(notion.rows.filter((r) => r.db === 'companies-db')).toHaveLength(1);
+  });
+
+  it('edits and clears fields, and explains bad values', async () => {
+    const c = company('Acme', { Industry: { select: { name: 'Fintech' } }, Website: { url: 'https://acme.com' } });
+    const ok = (await (await call('/companies/update', { id: c.id, name: 'Acme Corp', relationship: 'Active', priority: 'Medium', industry: '', website: '', location: 'Berlin', notes: 'Met the CEO', linkedin: 'linkedin.com/company/acme' })).json()) as any;
+    expect(ok.company).toMatchObject({ name: 'Acme Corp', relationship: 'Active', priority: 'Medium', industry: '', website: '', location: 'Berlin', notes: 'Met the CEO', linkedin: 'https://linkedin.com/company/acme' });
+    const msg = async (b: unknown) => ((await (await call('/companies/update', b)).json()) as any).error as string;
+    expect(await msg({ id: c.id, website: 'not a site' })).toMatch(/website/);
+    expect(await msg({ id: c.id, industry: 'Pottery' })).toMatch(/industry/);
+    expect(await msg({ id: c.id, name: ' ' })).toMatch(/name/);
+    expect(await msg({ id: c.id })).toMatch(/Nothing/);
+    expect(((await (await call('/companies/create', {})).json()) as any).error).toMatch(/name/);
+  });
+
+  it('only touches rows of the Companies database', async () => {
+    const person = notion.seed('people-db', { Name: title('Somebody') });
+    expect((await call('/companies/update', { id: person.id, name: 'hacked' })).status).toBe(404);
+    expect((await call(`/companies/history?id=${person.id}`)).status).toBe(404);
+  });
+
+  it('history: direct company links and those of its people, from meetings and interactions', async () => {
+    const ann = notion.seed('people-db', { Name: title('Ann') });
+    const c = company('Acme', { People: { relation: [{ id: ann.id }] } });
+    notion.seed('interactions-db', { Title: title('Call with Ann'), Date: { date: { start: '2026-10-20' } }, People: { relation: [{ id: ann.id }] } });
+    notion.seed('interactions-db', { Title: title('Sent proposal to Acme'), Date: { date: { start: '2026-10-25' } }, 'Companies (direct)': { relation: [{ id: c.id }] } });
+    notion.seed('meetings-db', { Name: title('Quarterly review'), Date: { date: { start: '2026-09-01' } }, Attendees: { relation: [{ id: ann.id }] } });
+    notion.seed('interactions-db', { Title: title('Unrelated'), Date: { date: { start: '2026-10-26' } }, People: { relation: [{ id: 'other' }] } });
+    const { history } = (await (await call(`/companies/history?id=${c.id}`)).json()) as any;
+    expect(history.map((h: any) => h.title)).toEqual(['Sent proposal to Acme', 'Call with Ann', 'Quarterly review']);
+  });
+});

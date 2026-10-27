@@ -31,7 +31,7 @@
   function updateBadge() {
     const n = all().filter(due).length;
     $('tabRecent').textContent = n ? 'People (' + n + ')' : 'People';
-    try { if (navigator.setAppBadge) (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {}); } catch { /* optional */ }
+    if (window.CCBadge) CCBadge.set('people', n);
   }
   function ago(iso) {
     if (!iso) return '';
@@ -159,6 +159,7 @@
     if (p.telegram) link('Telegram', p.telegram);
     if (p.linkedin) link('LinkedIn', p.linkedin);
     const info = $('pv-info'); info.replaceChildren();
+    if (p.company) { const row = line('Company', p.company); if (window.CCCompanies && CCCompanies.byName(p.company)) { const b = row.lastChild; b.style.textDecoration = 'underline'; b.style.cursor = 'pointer'; b.onclick = () => { closeSheet(); CCCompanies.openByName(p.company); }; } info.append(row); }
     if (p.phone) info.append(line('Phone', p.phone, 'tel:' + p.phone.replace(/[^\d+]/g, '')));
     if (p.email) info.append(line('Email', p.email, 'mailto:' + p.email));
     if (p.linkedin) info.append(line('LinkedIn', p.linkedin.replace(/^https?:\/\/(www\.)?/, ''), p.linkedin));
@@ -171,8 +172,21 @@
     if (!info.childNodes.length) info.append(el('div', 'muted', 'No contact details yet. Tap Edit to add some.'));
     $('p-notes').textContent = p.notes || 'No notes yet.';
     $('p-notion').href = p.url;
+    renderPersonTasks(p);
     loadHistory(p);
   }
+  function renderPersonTasks(p) {
+    const box = $('pv-tasks'); box.replaceChildren();
+    const list = window.CCTasks ? CCTasks.forPerson(p.id) : [];
+    for (const t of list) {
+      const row = el('div', 'kv'); row.style.cursor = 'pointer';
+      row.append(el('span', 'muted', t.due || '—')); const b = el('span'); b.append(el('b', '', t.title)); if (t.waiting) b.append(el('span', 'muted', ' · waiting on'));
+      row.append(b); row.onclick = () => { if (window.CCTasks) CCTasks.openTask(t.id); };
+      box.append(row);
+    }
+    if (!list.length) box.append(el('div', 'muted', 'No open tasks for this person.'));
+  }
+  $('pv-addtask').onclick = () => { if (!current || !window.CCTasks) return; const p = current; closeSheet(); CCTasks.startAdd({ id: p.id, name: p.name }); };
   async function loadHistory(p) {
     const box = $('pv-history');
     const draw = (items) => {
@@ -299,6 +313,8 @@
   $('recReload').onclick = () => sync(true);
 
   window.CCRecent = {
+    people: () => all(),
+    openPerson(id) { const p = state.items[id]; if (p) openSheet(p); },
     show() { render(); if (!syncing && (stale || Date.now() - loadedAt > 60000)) sync(); },
     invalidate() { stale = true; },
     refreshBadge() { if (cfg().tok && !syncing && (stale || Date.now() - loadedAt > 300000)) sync(); else updateBadge(); },

@@ -49,7 +49,8 @@ export class NotionClient {
       const detail = await res.text().catch(() => '');
       if (res.status === 401) throw new NotionError('Notion rejected the integration token.', 502);
       if (res.status === 404) {
-        throw new NotionError('Notion cannot see that database: share the Work CRM page with the integration.', 502);
+        const id = path.match(/\/(?:databases|pages)\/([0-9a-f-]{8,})/i)?.[1] ?? '';
+        throw new NotionError(`Notion cannot see ${id ? `the database or page ${id.slice(0, 8)}…` : 'a database the app needs'}. In Notion open it, tap ••• → Connections and add the app's connection.`, 502);
       }
       throw new NotionError(`Notion error ${res.status}: ${truncate(detail, 300)}`, 502);
     }
@@ -83,6 +84,11 @@ export class NotionClient {
   /** Move a page to Notion's trash (restorable there for 30 days). */
   archivePage(pageId: string): Promise<NotionPage> {
     return this.request<NotionPage>('PATCH', `/pages/${pageId}`, { archived: true });
+  }
+
+  /** The database object (title and properties), used to check the integration can see it. */
+  getDatabase(dbId: string): Promise<{ id: string; title?: { plain_text?: string }[]; properties: Record<string, any> }> {
+    return this.request('GET', `/databases/${dbId}`);
   }
 
   getPage(pageId: string): Promise<NotionPage> {

@@ -1,6 +1,6 @@
 // A tiny in-memory stand-in for the parts of the Notion API the worker uses.
 type Props = Record<string, any>;
-interface Row { id: string; db: string; properties: Props; archived?: boolean; edited?: string }
+interface Row { id: string; db: string; properties: Props; archived?: boolean; edited?: string; created?: string }
 
 export class FakeNotion {
   rows: Row[] = [];
@@ -14,18 +14,23 @@ export class FakeNotion {
   }
 
   private page(row: Row) {
-    return { id: row.id, url: `https://notion.test/${row.id}`, properties: row.properties, parent: { type: 'database_id', database_id: row.db }, archived: !!row.archived, last_edited_time: row.edited ?? new Date(Date.UTC(2026, 9, 1) + Number(row.id.replace(/\D/g, '')) * 60000).toISOString(), created_time: new Date(Date.UTC(2026, 9, 1) + Number(row.id.replace(/\D/g, '')) * 60000).toISOString() };
+    return { id: row.id, url: `https://notion.test/${row.id}`, properties: row.properties, parent: { type: 'database_id', database_id: row.db }, archived: !!row.archived, last_edited_time: row.edited ?? new Date(Date.UTC(2026, 9, 1) + Number(row.id.replace(/\D/g, '')) * 60000).toISOString(), created_time: row.created ?? new Date(Date.UTC(2026, 9, 1) + Number(row.id.replace(/\D/g, '')) * 60000).toISOString() };
   }
 
   private matches(row: Row, filter: any): boolean {
     if (!filter) return true;
+    if (filter.or) return filter.or.some((f: any) => this.matches(row, f));
+    if (filter.and) return filter.and.every((f: any) => this.matches(row, f));
+    if (filter.timestamp === 'created_time') return (row.created ?? new Date(Date.UTC(2026, 9, 1) + Number(row.id.replace(/\D/g, '')) * 60000).toISOString()) > filter.created_time.after;
     const prop = row.properties[filter.property];
     if (filter.timestamp === 'last_edited_time') return (row.edited ?? new Date(Date.UTC(2026, 9, 1) + Number(row.id.replace(/\D/g, '')) * 60000).toISOString()) > filter.last_edited_time.after;
+    if (filter.status) return (prop?.status?.name ?? 'Not started') !== filter.status.does_not_equal;
     if (filter.relation) return (prop?.relation ?? []).some((r: any) => r.id === filter.relation.contains);
     if (filter.email) return (prop?.email ?? null) === filter.email.equals;
     if (filter.url) return (prop?.url ?? '').includes(filter.url.contains);
     if (filter.title) {
       const t = (prop?.title ?? []).map((x: any) => x.plain_text ?? x.text.content).join('');
+      if (filter.title.equals !== undefined) return t === filter.title.equals;
       return t.toLowerCase().includes(String(filter.title.contains).toLowerCase());
     }
     throw new Error(`unsupported filter ${JSON.stringify(filter)}`);
@@ -50,6 +55,7 @@ export class FakeNotion {
     }
     if (url.pathname === '/v1/pages' && method === 'POST') {
       const row = this.seed(body.parent.database_id, this.normalise(body.properties));
+      row.created = new Date().toISOString(); // pages made through the API are new
       return ok(this.page(row));
     }
     m = url.pathname.match(/^\/v1\/pages\/([^/]+)$/);
