@@ -189,7 +189,8 @@ export interface PersonInput {
   location: string | null;
   notes: string | null;
   company: CompanyRef | null;
-  note: string; // where/how the user met them
+  note: string; // the user's note about this person
+  event?: { id: string; name: string } | null; // the event they were met at
   today: string;
   source: string; // "business card", "email signature" ...
 }
@@ -203,7 +204,7 @@ export interface UpsertOutcome {
 
 /** One dated line for the Notes field: what you typed, what the card said, and which fields this capture filled in. */
 function noteLine(input: PersonInput, filled: string[] = []): string {
-  const bits = [input.note, input.notes, filled.length ? `Filled in: ${filled.join(', ')}` : ''].filter(Boolean).join(' · ');
+  const bits = [input.note, input.event ? `Event: ${input.event.name}` : '', input.notes, filled.length ? `Filled in: ${filled.join(', ')}` : ''].filter(Boolean).join(' · ');
   return bits ? `${input.today}: ${bits}` : '';
 }
 
@@ -221,9 +222,11 @@ export async function createPerson(notion: NotionClient, dbId: string, input: Pe
   if (input.job_title) set('Role', P.rich(input.job_title));
   if (input.location) set('Location', P.rich(input.location));
   if (input.company) set('Company', P.relation([input.company.id]));
-  if (input.note) set('How We Know Each Other', P.rich(input.note));
+  if (input.event) set('Events', P.relation([input.event.id]), 'Event');
+  const how = input.event ? `Met at ${input.event.name}` : input.note;
+  if (how) set('How We Know Each Other', P.rich(how));
   props['Needs review'] = P.checkbox(true); // shows up in the "To review (captured)" view until you untick it
-  props.Notes = P.rich([`Added from ${input.source} on ${input.today}.`, input.notes].filter(Boolean).join(' '));
+  props.Notes = P.rich([`Added from ${input.source} on ${input.today}.`, input.note, input.notes].filter(Boolean).join(' '));
   const page = await notion.createPage(dbId, props);
   return { page, action: 'created', added, warnings: [] };
 }
@@ -287,8 +290,16 @@ export async function updatePerson(
       warnings.push(`The card shows ${input.company.name}, which differs from the company in the CRM. Left unchanged.`);
     }
   }
-  if (input.note && empty(p['How We Know Each Other'], 'rich_text')) {
-    props['How We Know Each Other'] = P.rich(input.note);
+  if (input.event) {
+    const ids: string[] = (p.Events?.relation ?? []).map((r: any) => r.id);
+    if (!ids.includes(input.event.id)) {
+      props.Events = P.relation([...ids, input.event.id]); // adds the event, keeps the ones already there
+      added.push('Event');
+    }
+  }
+  const how = input.event ? `Met at ${input.event.name}` : input.note;
+  if (how && empty(p['How We Know Each Other'], 'rich_text')) {
+    props['How We Know Each Other'] = P.rich(how);
     added.push('How We Know Each Other');
   }
   const line = noteLine(input, added);
@@ -314,13 +325,15 @@ export async function createMeeting(
   personName: string,
   note: string,
   today: string,
+  event: { name: string } | null = null,
 ): Promise<NotionPage> {
+  const summary = [note, event ? `Event: ${event.name}` : ''].filter(Boolean).join(' · ');
   return notion.createPage(dbId, {
-    Title: P.title(`Met ${personName}`),
-    Type: P.select('In person'),
+    Title: P.title(event ? `Met ${personName} at ${event.name}` : `Met ${personName}`),
+    Type: P.select(event ? 'Event' : 'In person'),
     Date: P.date(today),
     People: P.relation([personId]),
     'Needs follow-up': P.checkbox(false),
-    Summary: P.rich(note || 'Met in person. Added from the contact capture app.'),
+    Summary: P.rich(summary || 'Met in person. Added from the contact capture app.'),
   });
 }

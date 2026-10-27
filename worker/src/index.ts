@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { runCapture } from './capture';
 import { DEFAULT_MODEL, ExtractionError, extractContacts } from './extract';
+import { createEvent, getEvent, listEvents, parseNewEvent } from './events';
 import { readMe, updateMeValue } from './me';
 import { NotionClient, NotionError } from './notion';
 import { cleanEmail, cleanLinkedInLink, cleanPhone, cleanTelegram, cleanWebsite, nonEmpty } from './normalize';
@@ -102,9 +103,12 @@ export function parseRequest(raw: unknown, fallbackToday: string): CaptureReques
     if (typeof i.data !== 'string' || i.data.length === 0 || i.data.length > MAX_IMAGE_B64 || !/^[A-Za-z0-9+/=]+$/.test(i.data)) {
       return 'Invalid or oversized image data.';
     }
-    images.push({ media_type: i.media_type as CaptureImage['media_type'], data: i.data });
+    const imgNote = typeof i.note === 'string' ? nonEmpty(i.note, 500) : null;
+    images.push({ media_type: i.media_type as CaptureImage['media_type'], data: i.data, ...(imgNote ? { note: imgNote } : {}) });
   }
   const text = typeof o.text === 'string' ? o.text.trim().slice(0, 8000) : '';
+  const eventId = typeof o.event_id === 'string' && o.event_id ? o.event_id : undefined;
+  if (eventId && !/^[0-9a-z-]{6,40}$/i.test(eventId)) return 'event_id is not valid.';
   const manual = parseManual(o.contact);
   if (typeof manual === 'string') return manual;
   if (!images.length && !text && !manual) return 'Send at least one image, some text or a contact.';
@@ -113,7 +117,7 @@ export function parseRequest(raw: unknown, fallbackToday: string): CaptureReques
   // A meeting is only ever logged for photos or a typed contact (someone you are meeting), and only when asked for.
   // Text (an email signature) is never a meeting.
   const log_meeting = (images.length > 0 || !!manual) && o.log_meeting === true;
-  return { images, text, note, today, log_meeting, ...(manual ? { manual } : {}) };
+  return { images, text, note, today, log_meeting, ...(manual ? { manual } : {}), ...(eventId ? { event_id: eventId } : {}) };
 }
 
 /** The details you may share about yourself (Notion database "My sharing details"). */
@@ -142,6 +146,30 @@ async function handleMe(req: Request, env: Env, path: string, cors: Record<strin
   }
 }
 
+/** The Events database: list the events to choose from, or create a new one. */
+async function handleEvents(req: Request, env: Env, path: string, cors: Record<string, string>): Promise<Response> {
+  if (!env.NOTION_EVENTS_DB) return json({ error: 'NOTION_EVENTS_DB is not set.' }, 503, cors);
+  const notion = new NotionClient(env.NOTION_TOKEN);
+  try {
+    if (path === '/events') return json({ events: await listEvents(notion, env.NOTION_EVENTS_DB) }, 200, cors);
+    const raw = await req.text();
+    if (raw.length > 10_000) return json({ error: 'Request too large.' }, 413, cors);
+    let body: unknown;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return json({ error: 'Body is not valid JSON.' }, 400, cors);
+    }
+    const parsed = parseNewEvent(body, new Date().toISOString().slice(0, 10));
+    if (typeof parsed === 'string') return json({ error: parsed }, 400, cors);
+    return json({ event: await createEvent(notion, env.NOTION_EVENTS_DB, parsed) }, 200, cors);
+  } catch (err) {
+    if (err instanceof NotionError) return json({ error: err.message }, err.status, cors);
+    console.error(err);
+    return json({ error: 'Unexpected error.' }, 500, cors);
+  }
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const cors = corsHeaders(req, env);
@@ -151,7 +179,7 @@ export default {
     // Android posts shared files here; the app's service worker normally intercepts it. If it is not active yet, just open the app.
     if (url.pathname === '/share-target') return Response.redirect(new URL('/', url).href, 303);
     // Everything else is a static file of the app.
-    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST' };
+    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST' };
     const method = API[url.pathname];
     if (!method) {
       return env.ASSETS ? env.ASSETS.fetch(req) : json({ error: 'Not found.' }, 404, cors);
@@ -168,6 +196,7 @@ export default {
     }
 
     if (url.pathname === '/me' || url.pathname === '/me/update') return handleMe(req, env, url.pathname, cors);
+    if (url.pathname === '/events' || url.pathname === '/events/create') return handleEvents(req, env, url.pathname, cors);
 
     const length = Number(req.headers.get('Content-Length') ?? '0');
     if (length > MAX_BODY_BYTES) return json({ error: 'Request too large.' }, 413, cors);
@@ -182,13 +211,26 @@ export default {
     const parsed = parseRequest(body, new Date().toISOString().slice(0, 10));
     if (typeof parsed === 'string') return json({ error: parsed }, 400, cors);
 
+    const notion = new NotionClient(env.NOTION_TOKEN);
+    let event: { id: string; name: string } | null = null;
+    if (parsed.event_id) {
+      if (!env.NOTION_EVENTS_DB) return json({ error: 'NOTION_EVENTS_DB is not set.' }, 503, cors);
+      try {
+        event = await getEvent(notion, env.NOTION_EVENTS_DB, parsed.event_id);
+      } catch (err) {
+        if (err instanceof NotionError) return json({ error: err.message }, err.status, cors);
+        throw err;
+      }
+      if (!event) return json({ error: 'That event is not in your Events database. Pick it again.' }, 400, cors);
+    }
     const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
     const model = env.MODEL || DEFAULT_MODEL;
     try {
       const { results, errors } = await runCapture(
         {
           extract: (r) => extractContacts(anthropic, model, r),
-          notion: new NotionClient(env.NOTION_TOKEN),
+          notion,
+          event,
           peopleDb: env.NOTION_PEOPLE_DB,
           companiesDb: env.NOTION_COMPANIES_DB,
           interactionsDb: env.NOTION_INTERACTIONS_DB,

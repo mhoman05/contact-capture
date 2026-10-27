@@ -222,6 +222,7 @@ describe('parseContacts', () => {
           website: 'acme.com',
           location: null,
           notes: null,
+          source_image: 2,
         },
         { full_name: '', email: 'x@y.com' },
         null,
@@ -239,6 +240,7 @@ describe('parseContacts', () => {
         website: 'https://acme.com',
         location: null,
         notes: null,
+        source_image: 2,
       },
     ]);
   });
@@ -281,5 +283,65 @@ describe('typed and scanned contacts', () => {
     const p = fake.rows.find((r) => r.db === PEOPLE)!;
     expect(p.properties.Telegram.url).toBe('https://t.me/janedoe');
     expect(p.properties.Notes.rich_text[0].text.content).toContain('a scanned QR code');
+  });
+});
+
+describe('events and per-contact notes', () => {
+  const EVENT = { id: 'event-1', name: 'MERGE Madrid' };
+  const evDeps = (contacts: ExtractedContact[]): CaptureDeps => ({ ...deps(contacts), event: EVENT });
+  const sourced = (full_name: string, source_image: number | null, over: Partial<ExtractedContact> = {}) =>
+    contact({ full_name, email: `${full_name.split(' ')[0].toLowerCase()}@x.com`, phone: null, linkedin_url: null, company: null, source_image, ...over });
+  const photos = (...notes: string[]) => notes.map((note) => ({ media_type: 'image/jpeg' as const, data: 'AAAA', ...(note ? { note } : {}) }));
+  const prop = (name: string, key: string) => fake.rows.find((r) => r.db === PEOPLE && r.properties.Name.title[0].text.content === name)!.properties[key];
+  const noteOf = (name: string) => prop(name, 'Notes').rich_text[0].text.content as string;
+
+  it('links a new person to the event, sets how you know them, and uses the event for the meeting', async () => {
+    const res = await runCapture(evDeps([contact()]), request({ note: 'Wants an intro to the CFO' }));
+    expect(res.results[0].event).toBe('MERGE Madrid');
+    expect(prop('Jane Doe', 'Events').relation).toEqual([{ id: 'event-1' }]);
+    expect(prop('Jane Doe', 'How We Know Each Other').rich_text[0].text.content).toBe('Met at MERGE Madrid');
+    expect(noteOf('Jane Doe')).toContain('Added from');
+    const meeting = fake.rows.find((r) => r.db === INTERACTIONS)!;
+    expect(meeting.properties.Type.select.name).toBe('Event');
+    expect(meeting.properties.Title.title[0].text.content).toBe('Met Jane Doe at MERGE Madrid');
+    expect(meeting.properties.Summary.rich_text[0].text.content).toBe('Wants an intro to the CFO · Event: MERGE Madrid');
+  });
+
+  it('keeps the events a person already has and adds the new one', async () => {
+    fake.seed(PEOPLE, { Name: title('Jane Doe'), Email: { email: 'jane@acme.com' }, Events: { relation: [{ id: 'old-event' }] }, Notes: rich('') });
+    const res = await runCapture(evDeps([contact()]), request({ log_meeting: false }));
+    expect(res.results[0].added).toContain('Event');
+    expect(prop('Jane Doe', 'Events').relation).toEqual([{ id: 'old-event' }, { id: 'event-1' }]);
+    const again = await runCapture(evDeps([contact()]), request({ log_meeting: false }));
+    expect(again.results[0].added).not.toContain('Event');
+    expect(prop('Jane Doe', 'Events').relation).toHaveLength(2);
+  });
+
+  it('gives every contact in a bulk run the note typed for its own photo', async () => {
+    const people = [sourced('Ann One', 1), sourced('Bob Two', 2), sourced('Cy Three', 3)];
+    await runCapture(evDeps(people), request({ images: photos('Knows the CTO', '', 'Follow up on pricing'), note: '', log_meeting: false }));
+    expect(noteOf('Ann One')).toContain('Knows the CTO');
+    expect(noteOf('Bob Two')).not.toContain('Knows the CTO');
+    expect(noteOf('Cy Three')).toContain('Follow up on pricing');
+    expect(noteOf('Cy Three')).not.toContain('Knows the CTO');
+  });
+
+  it('uses the one photo note when the model gives no image number, and the general note for text', async () => {
+    await runCapture(deps([sourced('Dee Four', null)]), request({ images: photos('Met at the bar'), note: '', log_meeting: false }));
+    expect(noteOf('Dee Four')).toContain('Met at the bar');
+    await runCapture(deps([sourced('Eve Five', null)]), request({ images: [], text: 'sig', note: 'From her email', log_meeting: false }));
+    expect(noteOf('Eve Five')).toContain('From her email');
+  });
+
+  it('without an event, the note still becomes How We Know Each Other (as before)', async () => {
+    await runCapture(deps([contact()]), request({ note: 'Introduced by Andrei', log_meeting: false }));
+    expect(prop('Jane Doe', 'How We Know Each Other').rich_text[0].text.content).toBe('Introduced by Andrei');
+    expect(prop('Jane Doe', 'Events')).toBeUndefined();
+  });
+
+  it('does not guess when several photos have notes and the photo of a person is unknown', async () => {
+    const res = await runCapture(deps([sourced('Fay Six', null)]), request({ images: photos('Knows the CTO', 'Pricing'), note: '', log_meeting: false }));
+    expect(noteOf('Fay Six')).not.toContain('Knows the CTO');
+    expect(res.results[0].warnings.join(' ')).toContain('photo 1: Knows the CTO; photo 2: Pricing');
   });
 });

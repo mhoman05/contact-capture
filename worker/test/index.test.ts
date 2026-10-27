@@ -197,3 +197,52 @@ describe('typed contacts in the request', () => {
     expect(parseRequest(base, 'x')).toMatch(/at least one/i);
   });
 });
+
+describe('events', () => {
+  const notion = new FakeNotion();
+  const evEnv = { ...env, NOTION_EVENTS_DB: 'events-db' };
+  const authed = { Authorization: 'Bearer correct horse' };
+  const evRow = (name: string, date: string, type = 'Conference') =>
+    notion.seed('events-db', { Name: title(name), Date: { date: { start: date } }, Type: { select: { name: type } }, Location: rich('Madrid') });
+  const older = evRow('Old meetup', '2026-01-10', 'Meetup');
+  const newer = evRow('MERGE Madrid', '2026-10-26');
+  const other = notion.seed('people-db', { Name: title('Somebody') });
+  const callEv = (path: string, init: RequestInit = {}) => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((i: any, n: any) => notion.fetch(i, n)) as typeof fetch;
+    return worker.fetch(new Request(`https://w.test${path}`, init), evEnv).finally(() => (globalThis.fetch = realFetch));
+  };
+
+  it('requires the access token', async () => {
+    expect((await callEv('/events')).status).toBe(401);
+    expect((await callEv('/events/create', { method: 'POST', body: '{}' })).status).toBe(401);
+  });
+  it('lists events newest first', async () => {
+    const { events } = (await (await callEv('/events', { headers: authed })).json()) as { events: any[] };
+    expect(events.map((e) => e.name)).toEqual(['MERGE Madrid', 'Old meetup']);
+    expect(events[0]).toMatchObject({ id: newer.id, date: '2026-10-26', type: 'Conference', location: 'Madrid' });
+    expect(older.id).toBeTruthy();
+  });
+  it('creates an event with sensible defaults', async () => {
+    const res = await callEv('/events/create', { method: 'POST', headers: authed, body: JSON.stringify({ name: ' Padel night ', date: 'not a date', type: 'nope' }) });
+    expect(res.status).toBe(200);
+    const { event } = (await res.json()) as any;
+    expect(event).toMatchObject({ name: 'Padel night', type: 'Other' });
+    expect(event.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(notion.rows.filter((r) => r.db === 'events-db')).toHaveLength(3);
+    expect((await callEv('/events/create', { method: 'POST', headers: authed, body: '{}' })).status).toBe(400);
+  });
+});
+
+describe('notes and events in the capture request', () => {
+  const ok = { media_type: 'image/jpeg', data: 'AAAA' };
+  it('keeps a note per image and an event id', () => {
+    const r = parseRequest({ images: [{ ...ok, note: ' CTO friend ' }, ok], event_id: 'abc-123456', log_meeting: false }, 'x') as any;
+    expect(r.images[0].note).toBe('CTO friend');
+    expect(r.images[1].note).toBeUndefined();
+    expect(r.event_id).toBe('abc-123456');
+  });
+  it('rejects a malformed event id', () => {
+    expect(parseRequest({ images: [ok], event_id: '../../x' }, 'x')).toMatch(/event_id/);
+  });
+});

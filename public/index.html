@@ -38,10 +38,9 @@ button:disabled{opacity:.5;cursor:default}
 button.icon{padding:0;width:44px}
 .row{display:flex;gap:8px;flex-wrap:wrap}
 .row>*{flex:1}
-.thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;margin-bottom:10px}
+.thumbs{display:block;margin-bottom:6px}
 .thumb{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--soft);border:1px solid var(--line)}
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
-.thumb button{position:absolute;top:4px;right:4px;min-height:30px;width:30px;padding:0;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;border:0}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 .chip{font-size:13px;padding:4px 10px;min-height:0;border-radius:999px}
 .check{display:flex;align-items:flex-start;gap:10px;margin-top:12px;color:var(--ink);font-size:15px}
@@ -54,6 +53,15 @@ button.icon{padding:0;width:44px}
 .item{padding:6px 0;border-top:1px solid var(--line)}
 .item:first-child{border-top:0}
 #meStatus.bad{color:var(--bad)}
+.evbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;margin-bottom:12px;background:var(--soft);border-radius:10px}
+.evbar b{flex:1;min-width:0;overflow-wrap:anywhere}
+.evlist{display:grid;gap:6px;margin-top:8px;max-height:46vh;overflow:auto}
+.evlist button{justify-content:flex-start;text-align:left;flex-wrap:wrap}
+.trow{display:flex;gap:10px;align-items:flex-start;margin-bottom:10px}
+.trow .thumb{width:76px;height:76px;aspect-ratio:auto;flex:none}
+.trow .tnote{flex:1;min-width:0;display:grid;gap:4px}
+.trow .tnote label{margin:0;font-size:13px}
+.trow .rm{flex:none;min-height:36px;width:36px;padding:0;border-radius:50%}
 .scanner{position:fixed;inset:0;background:#000;z-index:20;display:flex;flex-direction:column;color:#fff}
 .scanner video{flex:1;min-height:0;width:100%;object-fit:cover}
 .scanner .bar{padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:#111;display:grid;gap:10px}
@@ -103,7 +111,28 @@ a{color:var(--accent)}
   </section>
 
   <div id="addView" style="display:contents">
+  <section class="card hidden" id="evPicker">
+    <h2>Which event are you at?</h2>
+    <input type="text" id="evFilter" placeholder="Search your events…" autocomplete="off">
+    <div class="evlist" id="evList"></div>
+    <p class="muted" id="evMsg" role="status" style="margin:8px 0 0"></p>
+    <div class="row" style="margin-top:10px">
+      <button id="evNone" type="button">No event</button>
+      <button id="evNewBtn" type="button">＋ New event</button>
+      <button id="evClose" type="button">Close</button>
+    </div>
+    <div id="evNew" class="hidden">
+      <label for="evNewName">Event name</label><input type="text" id="evNewName" autocomplete="off" placeholder="MERGE Madrid">
+      <label for="evNewDate">Date</label><input type="date" id="evNewDate">
+      <label for="evNewType">Type</label>
+      <select id="evNewType"><option>Conference</option><option>Dinner / Drinks</option><option>Meetup</option><option>Panel / Speaking</option><option>Other</option></select>
+      <label for="evNewLoc">Location (optional)</label><input type="text" id="evNewLoc" autocomplete="off" placeholder="Madrid">
+      <button class="primary" id="evCreate" type="button" style="margin-top:12px">Create in Notion and use it</button>
+    </div>
+  </section>
+
   <section class="card" id="capture">
+    <div class="evbar"><span class="muted">Event</span><b id="evName">None</b><button class="chip" id="evChange" type="button">Choose</button></div>
     <div class="thumbs hidden" id="thumbs"></div>
     <div class="row">
       <label class="btn" for="cam">📷 Take photo</label>
@@ -138,9 +167,10 @@ a{color:var(--accent)}
     <button class="chip" id="showText" type="button" style="margin-top:10px">Paste text instead</button>
     <p class="muted" id="sigTip" style="margin:8px 0 0">Email signature? Share a screenshot, or select the text and share it. A photo of a screen is often too blurry to read.</p>
 
-    <label for="note">Where or how did you meet? (optional)</label>
-    <input type="text" id="note" autocomplete="off" placeholder="MERGE Madrid, introduced by Andrei…">
-    <div class="chips" id="recent"></div>
+    <div id="noteWrap">
+      <label for="note">Note about this person (optional)</label>
+      <input type="text" id="note" autocomplete="off" placeholder="Wants an intro to their CTO, follow up on pricing…">
+    </div>
 
     <label class="check" id="meetWrap"><input type="checkbox" id="meet"><span>I met them in person: log a meeting today<br><span class="muted">Tick when you met them today. Leave unticked for contacts you add later, in bulk, or from an email. Counts as contact in your follow-up cadence.</span></span></label>
 
@@ -253,23 +283,34 @@ a{color:var(--accent)}
     if (state.images.length >= MAX_PHOTOS) { showResult([el('div', 'err', 'Up to ' + MAX_PHOTOS + ' photos at a time. Send these first, then add the rest.')]); return; }
     state.images.push({ blob, url: URL.createObjectURL(blob) });
   }
+  let thumbSig = '';
   function renderThumbs() {
     const box = $('thumbs');
+    const sig = state.images.map((i) => i.url).join('|');
+    box.classList.toggle('hidden', state.images.length === 0);
+    if (sig === thumbSig) return; // keep what you are typing in a note while other things change
+    thumbSig = sig;
     box.replaceChildren();
     state.images.forEach((im, i) => {
+      const row = document.createElement('div'); row.className = 'trow';
       const d = document.createElement('div'); d.className = 'thumb';
-      const img = document.createElement('img'); img.src = im.url; img.alt = 'Photo ' + (i + 1);
-      const x = document.createElement('button'); x.type = 'button'; x.textContent = '×'; x.setAttribute('aria-label', 'Remove photo ' + (i + 1));
+      const img = document.createElement('img'); img.src = im.url; img.alt = 'Photo ' + (i + 1); d.append(img);
+      const n = document.createElement('div'); n.className = 'tnote';
+      const l = document.createElement('label'); l.textContent = state.images.length > 1 ? 'Note for photo ' + (i + 1) + ' (optional)' : 'Note about this person (optional)'; l.htmlFor = 'tn' + i;
+      const inp = document.createElement('input'); inp.type = 'text'; inp.id = 'tn' + i; inp.value = im.note || ''; inp.autocomplete = 'off'; inp.placeholder = 'Context to remember';
+      inp.oninput = () => { im.note = inp.value; };
+      n.append(l, inp);
+      const x = document.createElement('button'); x.type = 'button'; x.className = 'rm'; x.textContent = '×'; x.setAttribute('aria-label', 'Remove photo ' + (i + 1));
       x.onclick = () => { URL.revokeObjectURL(im.url); state.images.splice(i, 1); refresh(); };
-      d.append(img, x); box.append(d);
+      row.append(d, n, x); box.append(row);
     });
-    box.classList.toggle('hidden', state.images.length === 0);
   }
   function refresh() {
     renderThumbs();
     const hasText = $('text').value.trim().length > 0;
     $('textWrap').classList.toggle('hidden', !hasText && $('showText').dataset.open !== '1');
     $('showText').classList.toggle('hidden', !$('textWrap').classList.contains('hidden'));
+    $('noteWrap').classList.toggle('hidden', state.images.length > 0); // with photos each one has its own note
     const hasContact = $('m-name').value.trim().length > 0;
     $('meetWrap').classList.toggle('hidden', !(state.images.length || hasContact)); // pasted text (a signature) is never a meeting
     $('send').disabled = state.busy || !(state.images.length || hasText || hasContact) || !configured();
@@ -281,32 +322,12 @@ a{color:var(--accent)}
   $('showText').onclick = () => { $('showText').dataset.open = '1'; refresh(); $('text').focus(); };
   $('text').oninput = refresh;
 
-  // Remembered between uses: the meeting tickbox stays as you left it (ticked at an event, unticked for bulk at home),
-  // and the note stays for 12 hours so a run of cards from one event needs no retyping.
+  // Remembered between uses: the meeting tickbox stays as you left it (ticked at an event, unticked for bulk at home).
+  // The event is remembered by events.js; notes are per person and start empty every time.
   $('meet').checked = store.get('cc.meet') === '1';
   $('meet').onchange = () => store.set('cc.meet', $('meet').checked ? '1' : '0');
   $('auto').checked = store.get('cc.auto') === '1';
   $('auto').onchange = () => store.set('cc.auto', $('auto').checked ? '1' : '0');
-  function restoreNote() {
-    const at = Number(store.get('cc.noteAt', '0'));
-    if (!$('note').value && at && Date.now() - at < 12 * 3600 * 1000) $('note').value = store.get('cc.note', '');
-  }
-  $('note').oninput = () => { store.set('cc.note', $('note').value); store.set('cc.noteAt', String(Date.now())); };
-
-  const recent = () => { try { return JSON.parse(store.get('cc.recent', '[]')); } catch { return []; } };
-  function renderRecent() {
-    const box = $('recent'); box.replaceChildren();
-    for (const r of recent()) {
-      const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = r;
-      b.onclick = () => { $('note').value = r; $('note').oninput(); };
-      box.append(b);
-    }
-  }
-  function rememberNote(n) {
-    if (!n) return;
-    store.set('cc.recent', JSON.stringify([n, ...recent().filter((x) => x !== n)].slice(0, 4)));
-    renderRecent();
-  }
 
   // What the Android share sheet delivered (stored by sw.js)
   async function loadShared() {
@@ -352,6 +373,7 @@ a{color:var(--accent)}
       const head = el('div'); head.append(el('b', '', r.name), el('span', 'muted', ' · ' + verb + (r.company ? ' · ' + r.company : '')));
       box.append(head);
       if (r.added?.length || r.needs_review) { const t = el('div'); if (r.needs_review) t.append(el('span', 'tag', 'Needs review')); (r.added || []).forEach((a) => t.append(el('span', 'tag', a))); box.append(t); }
+      if (r.event) box.append(el('div', 'muted', 'Linked to ' + r.event + '.'));
       if (r.interaction_url) box.append(el('div', 'muted', 'Meeting logged for today.'));
       for (const w of r.warnings || []) box.append(el('div', 'warn', w));
       const links = el('div'); links.style.marginTop = '8px';
@@ -403,15 +425,15 @@ a{color:var(--accent)}
     state.busy = true;
     const btn = $('send'); btn.disabled = true; btn.replaceChildren(el('span', 'spin'), document.createTextNode(' Reading and filing…'));
     $('result').classList.add('hidden');
-    const note = $('note').value.trim();
+    const note = state.images.length ? '' : $('note').value.trim(); // with photos, each photo carries its own note
     try {
       const images = [];
-      for (const im of state.images) images.push({ media_type: 'image/jpeg', data: await toJpegBase64(im.blob) });
+      for (const im of state.images) images.push({ media_type: 'image/jpeg', data: await toJpegBase64(im.blob), note: (im.note || '').trim() });
       const c = new AbortController(); const timer = setTimeout(() => c.abort(), 120000);
       const res = await fetch(cfg().url + '/capture', {
         method: 'POST', signal: c.signal,
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg().tok },
-        body: JSON.stringify({ images, text: $('text').value.trim(), note, today: localDate(), contact: manualContact(), log_meeting: (state.images.length > 0 || !!manualContact()) && $('meet').checked }),
+        body: JSON.stringify({ images, text: $('text').value.trim(), note, today: localDate(), event_id: window.CCEvent ? window.CCEvent.current() : null, contact: manualContact(), log_meeting: (state.images.length > 0 || !!manualContact()) && $('meet').checked }),
       }).finally(() => clearTimeout(timer));
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -420,7 +442,7 @@ a{color:var(--accent)}
       } else {
         renderOutcome(data);
         if ((data.results || []).length) {
-          rememberNote(note);
+          $('note').value = '';
           state.images.forEach((i) => URL.revokeObjectURL(i.url)); state.images = [];
           $('text').value = ''; $('showText').dataset.open = ''; clearShared(); clearManual();
         }
@@ -435,13 +457,12 @@ a{color:var(--accent)}
 
   // ---- start -------------------------------------------------------------------
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
-  renderRecent();
-  restoreNote();
   if (!configured()) showSetup(true);
   refresh();
   loadShared();
 })();
 </script>
 <script src="card.js"></script>
+<script src="events.js"></script>
 </body>
 </html>

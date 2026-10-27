@@ -42,9 +42,11 @@ Changes to the files in `public/` alone do not trigger a deploy; after copying n
 
 ## Using it
 
-- **Meeting someone (at an event or a meeting):** take a photo of the card → *Share* → **Contact capture** → tick *I met them in person* → type where (the note stays for 12 hours, so the next cards need no retyping) → *Add to CRM*. Fill in details in Notion later; the person is under *To review*. In Settings you can switch on "send straight away" so sharing a photo is the only step.
-- **Bulk at home after an event:** leave *I met them in person* unticked, share up to 12 cards at a time, and review them the same day in *To review (captured)*.
-- **No business card:** tap **Type it in** and enter name, company, phone, email (and under *More*: role, LinkedIn, Telegram, website). The note and the *I met them in person* tickbox work the same as for photos. Nothing is sent to Claude, so it costs nothing; the person lands in Notion marked *Needs review*.
+- **At an event:** at the top of the Add screen, tap **Choose** next to *Event*. Pick one of your events from Notion (the ones closest to today are first, and you can search) or tap **＋ New event** (name, date, type, optional location; it is created in your Events database and selected). The event is remembered for 12 hours, so you set it once. **No event** clears it.
+  - Take a photo of each card → *Share* → **Contact capture** → type a **note about this person** (optional: what you talked about, what to follow up) → *Add to CRM*. Tick *I met them in person* to also log a meeting today (an *Event* interaction named after the event).
+  - Everyone you add is linked to the event (People → *Events*), and *How We Know Each Other* says "Met at <event>". People already in the CRM keep what they have; the event is added to their list of events. The note goes into their *Notes* and into the meeting summary. Fill in details in Notion later; new people are under *To review*. In Settings you can switch on "send straight away" so sharing a photo is the only step.
+- **Bulk after an event:** choose the event (or leave it empty), leave *I met them in person* unticked, share up to 12 cards at a time, and write a short note under each photo. Claude tells which person came from which photo; if it cannot tell, the notes are shown as a warning instead of being guessed. Review the people the same day in *To review (captured)*.
+- **No business card:** tap **Type it in** and enter name, company, phone, email (and under *More*: role, LinkedIn, Telegram, website). The event, the note and the *I met them in person* tickbox work the same as for photos. Nothing is sent to Claude, so it costs nothing; the person lands in Notion marked *Needs review*.
 - **Scan a QR code:** tap **Scan a QR code** and point the camera at it, or choose a photo or screenshot of the code. The details fill the same form so you can correct them before sending.
   - *LinkedIn* QR code: the profile link is saved in the LinkedIn field. LinkedIn does not put the name in the code, so the app guesses it from the address when it can (check it) and otherwise asks you to type it. The person then shows up in *Needs LinkedIn enrichment*.
   - *Telegram* QR code (a `t.me/username` link): saved in the new **Telegram** field of People. Telegram only shares the username, so type the name. Group invite links are refused.
@@ -93,7 +95,7 @@ The app itself is in GitHub and Cloudflare, and your contacts and details are in
 cd worker
 npm ci
 npm run typecheck
-npm test            # 50 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
+npm test            # 61 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
 ```
 
 Run everything locally with `npx wrangler@4 dev`, putting the three secrets in `worker/.dev.vars` (git-ignored), then open `http://127.0.0.1:8787/`.

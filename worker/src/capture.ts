@@ -7,6 +7,7 @@ export interface CaptureDeps {
   peopleDb: string;
   companiesDb: string;
   interactionsDb: string;
+  event?: { id: string; name: string } | null; // the event the people were met at (already checked)
 }
 
 function sourceLabel(req: CaptureRequest): string {
@@ -18,14 +19,25 @@ function sourceLabel(req: CaptureRequest): string {
 /** Read the contacts out of the images/text and write them to the CRM. Contacts are handled one by one so a failure on one does not lose the others. */
 export async function runCapture(deps: CaptureDeps, req: CaptureRequest): Promise<{ results: CaptureResult[]; errors: string[] }> {
   const extracted = req.images.length || req.text ? await deps.extract(req) : [];
+  // Each contact gets the note typed for its own photo; text and typed contacts use the general note.
+  const photoNote = (c: ExtractedContact): string => {
+    const img = (c.source_image ? req.images[c.source_image - 1] : undefined) ?? (req.images.length === 1 ? req.images[0] : undefined);
+    return img?.note || req.note;
+  };
+  // With several photos and no way to tell which one a person came from, their notes are shown as a warning instead of guessed.
+  const unattributed = (c: ExtractedContact): string[] => {
+    const known = c.source_image && req.images[c.source_image - 1];
+    if (known || req.images.length < 2) return [];
+    return req.images.flatMap((im, i) => (im.note ? [`photo ${i + 1}: ${im.note}`] : []));
+  };
   const contacts = [
-    ...extracted.map((contact) => ({ contact, source: sourceLabel(req) })),
-    ...(req.manual ? [req.manual] : []),
+    ...extracted.map((contact) => ({ contact, source: sourceLabel(req), note: photoNote(contact), lost: unattributed(contact) })),
+    ...(req.manual ? [{ ...req.manual, note: req.note, lost: [] as string[] }] : []),
   ];
   const results: CaptureResult[] = [];
   const errors: string[] = [];
 
-  for (const { contact: c, source } of contacts) {
+  for (const { contact: c, source, note, lost } of contacts) {
     try {
       const lookup = await findPerson(deps.notion, deps.peopleDb, c);
       const company = c.company ? await findOrCreateCompany(deps.notion, deps.companiesDb, c.company, c.website) : null;
@@ -39,7 +51,8 @@ export async function runCapture(deps: CaptureDeps, req: CaptureRequest): Promis
         location: c.location,
         notes: c.notes,
         company,
-        note: req.note,
+        note,
+        event: deps.event ?? null,
         today: req.today,
         source,
       };
@@ -48,6 +61,7 @@ export async function runCapture(deps: CaptureDeps, req: CaptureRequest): Promis
         : await createPerson(deps.notion, deps.peopleDb, input);
 
       const warnings = [...outcome.warnings];
+      if (lost.length) warnings.push(`Could not tell which photo this person came from, so your photo notes were not added (${lost.join('; ')}).`);
       if (!lookup.match && lookup.similar.length) {
         const names = lookup.similar.map((p) => pageTitle(p, 'Name')).join(', ');
         warnings.push(`Possible duplicate of ${names}. Added as a new person; check and merge if it is the same one.`);
@@ -55,7 +69,7 @@ export async function runCapture(deps: CaptureDeps, req: CaptureRequest): Promis
 
       let interactionUrl: string | null = null;
       if (req.log_meeting) {
-        const meeting = await createMeeting(deps.notion, deps.interactionsDb, outcome.page.id, c.full_name, req.note, req.today);
+        const meeting = await createMeeting(deps.notion, deps.interactionsDb, outcome.page.id, c.full_name, note, req.today, deps.event ?? null);
         interactionUrl = meeting.url;
       }
 
@@ -64,6 +78,7 @@ export async function runCapture(deps: CaptureDeps, req: CaptureRequest): Promis
         company: company?.name ?? null,
         action: outcome.action,
         needs_review: outcome.action === 'created',
+        event: deps.event?.name ?? null,
         page_url: outcome.page.url,
         added: outcome.added,
         interaction_url: interactionUrl,

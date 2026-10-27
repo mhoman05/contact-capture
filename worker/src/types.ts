@@ -9,6 +9,7 @@ export interface Env {
   NOTION_COMPANIES_DB: string;
   NOTION_INTERACTIONS_DB: string;
   NOTION_ME_DB?: string; // "My sharing details" database
+  NOTION_EVENTS_DB?: string; // Events database
   MODEL?: string;
   // Static files of the app (the public/ folder), served by Cloudflare. Absent in unit tests.
   ASSETS?: Fetcher;
@@ -25,11 +26,13 @@ export interface ExtractedContact {
   location: string | null;
   notes: string | null;
   telegram_url?: string | null; // only set by typed or scanned contacts
+  source_image?: number | null; // 1-based number of the image the person was read from
 }
 
 export interface CaptureImage {
   media_type: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
   data: string; // base64, no data: prefix
+  note?: string; // your note about the person on this card (never sent to the model)
 }
 
 /** A contact typed in (or filled from a scanned QR code) instead of read from a photo. Already validated by parseRequest. */
@@ -45,12 +48,14 @@ export interface CaptureRequest {
   today: string; // YYYY-MM-DD in the user's time zone
   log_meeting: boolean; // also add an "In person" interaction dated today (photos and typed contacts only)
   manual?: ManualContact;
+  event_id?: string; // the Notion Events page the people were met at
 }
 
 export interface CaptureResult {
   name: string;
   company: string | null;
   action: 'created' | 'updated' | 'unchanged';
+  event: string | null; // the event they were linked to
   needs_review: boolean; // new people are flagged in Notion so they show up in the review view
   page_url: string;
   added: string[]; // CRM fields that were filled in
