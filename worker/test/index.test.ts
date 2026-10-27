@@ -738,3 +738,70 @@ describe('companies', () => {
     expect(history.map((h: any) => h.title)).toEqual(['Sent proposal to Acme', 'Call with Ann', 'Quarterly review']);
   });
 });
+
+describe('logging a meeting or interaction', () => {
+  const authed = { Authorization: 'Bearer correct horse' };
+  let notion: FakeNotion;
+  const lEnv = { ...env, NOTION_PEOPLE_DB: 'people-db', NOTION_INTERACTIONS_DB: 'interactions-db', NOTION_MEETINGS_DB: 'meetings-db' };
+  const call = (body: unknown, token = true) => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((i: any, n: any) => notion.fetch(i, n)) as typeof fetch;
+    return worker
+      .fetch(new Request('https://w.test/interactions/create', { method: 'POST', headers: token ? authed : {}, body: JSON.stringify(body) }), lEnv)
+      .finally(() => (globalThis.fetch = realFetch));
+  };
+  const person = (name: string) => notion.seed('people-db', { Name: title(name) });
+  beforeEach(() => { notion = new FakeNotion(); });
+
+  it('needs the access token', async () => {
+    expect((await call({}, false)).status).toBe(401);
+  });
+
+  it('logs an interaction with type, date, direction, summary and the follow-up flag, titled after the person', async () => {
+    const ann = person('Ann Adams');
+    const res = await call({ type: 'Call', person_ids: [ann.id], date: '2026-10-28', direction: 'Outbound', summary: 'Wants a demo', needs_followup: true });
+    expect(res.status).toBe(200);
+    const { logged } = (await res.json()) as any;
+    expect(logged).toMatchObject({ kind: 'interaction', title: 'Call with Ann Adams', type: 'Call', date: '2026-10-28' });
+    const row = notion.rows.find((r) => r.db === 'interactions-db')!;
+    expect(row.properties.Type.select.name).toBe('Call');
+    expect(row.properties.Direction.select.name).toBe('Outbound');
+    expect(row.properties['Needs follow-up'].checkbox).toBe(true);
+    expect(row.properties.Summary.rich_text[0].text.content).toBe('Wants a demo');
+    expect(row.properties.People.relation).toEqual([{ id: ann.id }]);
+  });
+
+  it('logs a calendar meeting in the Meetings database with attendees and topics', async () => {
+    const a = person('Ann Adams');
+    const b = person('Bob Brown');
+    const { logged } = (await (await call({ type: 'Meeting', person_ids: [a.id, b.id], date: '2026-10-28', summary: 'Pricing', title: 'Budget review' })).json()) as any;
+    expect(logged).toMatchObject({ kind: 'meeting', title: 'Budget review' });
+    const row = notion.rows.find((r) => r.db === 'meetings-db')!;
+    expect(row.properties.Attendees.relation).toEqual([{ id: a.id }, { id: b.id }]);
+    expect(row.properties['Topics Discussed'].rich_text[0].text.content).toBe('Pricing');
+    expect(notion.rows.filter((r) => r.db === 'interactions-db')).toHaveLength(0);
+  });
+
+  it('is safe to send twice and defaults the date to today', async () => {
+    const ann = person('Ann Adams');
+    const first = (await (await call({ type: 'In person', person_ids: [ann.id], date: '2026-10-28' })).json()) as any;
+    const second = (await (await call({ type: 'In person', person_ids: [ann.id], date: '2026-10-28' })).json()) as any;
+    expect(second.logged.id).toBe(first.logged.id);
+    expect(notion.rows.filter((r) => r.db === 'interactions-db')).toHaveLength(1);
+    const today = (await (await call({ type: 'Email', person_ids: [ann.id], today: '2026-11-01' })).json()) as any;
+    expect(today.logged.date).toBe('2026-11-01');
+  });
+
+  it('refuses bad input and pages that are not people', async () => {
+    const ann = person('Ann Adams');
+    const company = notion.seed('companies-db', { Name: title('Acme') });
+    const msg = async (b: unknown) => ((await (await call(b)).json()) as any).error as string;
+    expect(await msg({ type: 'Dance', person_ids: [ann.id] })).toMatch(/Type must be/);
+    expect(await msg({ type: 'Call', person_ids: [] })).toMatch(/at least one person/);
+    expect(await msg({ type: 'Call', person_ids: ['../x'] })).toMatch(/at least one person/);
+    expect(await msg({ type: 'Call', person_ids: [ann.id], date: 'yesterday' })).toMatch(/date/);
+    expect(await msg({ type: 'Call', person_ids: [ann.id], direction: 'Sideways' })).toMatch(/Direction/);
+    expect((await call({ type: 'Call', person_ids: [company.id] })).status).toBe(404);
+    expect(notion.rows.filter((r) => r.db === 'interactions-db')).toHaveLength(0);
+  });
+});

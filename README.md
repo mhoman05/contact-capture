@@ -67,6 +67,7 @@ The **People** tab shows everyone in your Notion People database: a list you can
 
 - **Tap a name** to reveal the details: phone, email, LinkedIn, Telegram, location, how you met, events, follow-up date, your notes, and the **meetings and interactions** logged for them (calendar meetings and calls, emails, events …), newest first. Quick buttons call, WhatsApp, email, or open Telegram and LinkedIn.
 - **✎ Edit** opens the editor: name, company, role, phone, email, LinkedIn, Telegram, location, **tier** (how often to stay in touch), a new note (added to *Notes* with today's date, earlier notes are kept), the follow-up date and *Needs review*. Everything saves straight to Notion, only the fields you changed are sent, and clearing a field empties it in Notion.
+- **＋ Log meeting or interaction** (on the details screen, next to *Add task for this person*): choose what it was (*In person, Call, Online call, WhatsApp / Message, Email, LinkedIn, Event*, or *Meeting* for the Meetings database), the date (today, yesterday or pick), a direction for calls and messages, an optional title (otherwise "Call with Ann Adams"), what was discussed, and *Needs follow-up*. You can also set the person's **next follow-up** (in 3 days, 1 week, 2 weeks, 1 month, or none) in the same step. It is written to Notion's Interactions (or Meetings) database, appears in the person's history straight away and counts as contact for the follow-up cadence. Logging the same thing twice never creates it twice.
 - **Also on the details screen:** *Save to phone contacts*, *Delete person* (Notion's trash, restorable for 30 days) and *Open in Notion*.
 - **The phone keeps its own copy** of the list (IndexedDB). The first open reads everyone once (100 at a time, with a progress count); after that the app only asks for people edited since the last time, so opening the tab is quick. Once a day, and whenever you tap *Reload everything from Notion*, it reads everything again, which is also how people deleted directly in Notion disappear from the phone. Offline, the last copy is shown.
 - **Follow-up reminder:** every new person gets a *Next Follow-up* date 7 days ahead (change the number of days in ⚙ Settings; 0 turns it off). People already in the CRM never get their date changed. People whose date has come are marked *Follow up today* or *overdue*, the **Follow up** filter lists them oldest first, and the People tab shows their count (also as a badge on the app icon where Android allows it, updated whenever the app is opened).
@@ -149,7 +150,7 @@ The app itself is in GitHub and Cloudflare, and your contacts and details are in
 cd worker
 npm ci
 npm run typecheck
-npm test            # 101 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
+npm test            # 107 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
 ```
 
 Run everything locally with `npx wrangler@4 dev`, putting the three secrets in `worker/.dev.vars` (git-ignored), then open `http://127.0.0.1:8787/`.
@@ -161,3 +162,6 @@ Each row in the Notion database *My sharing details* needs a **Type** (Phone, Em
 
 ## Contact files: format notes
 Contact cards (QR codes, share links, downloaded `.vcf` files) are vCard 3.0. Types are written the way Apple's own files do it (`TYPE=INTERNET;TYPE=HOME`, one parameter each). A comma-joined list (`TYPE=HOME,INTERNET`, used by versions up to v18) made Apple Contacts on the Mac stop reading the card at the email line, so only the name and first phone number arrived. The share-link service rewrites such lists on the fly, so links made by older versions open fully too. Links and websites carry a label (LinkedIn, Website …).
+
+## The tab bar
+**Add | People | Tasks | My QR** and the settings button sit in one bar fixed at the top of the screen. It stays put while you scroll a long list, and the letter headings of the People and Companies lists stick right below it, so one tap switches tabs from anywhere in the list.

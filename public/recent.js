@@ -186,6 +186,47 @@
     }
     if (!list.length) box.append(el('div', 'muted', 'No open tasks for this person.'));
   }
+  // ---- log a meeting or interaction -------------------------------------------------------------
+  const DIRECTION_TYPES = ['Call', 'Online call', 'WhatsApp / Message', 'Email', 'LinkedIn'];
+  function openLog(p) {
+    current = p;
+    $('l-who').textContent = p.name;
+    $('l-type').value = store.get('cc.log.type', 'In person'); $('l-date').value = today();
+    $('l-dir').value = ''; $('l-title').value = ''; $('l-summary').value = ''; $('l-fu').checked = false; $('l-next').value = 'keep';
+    $('l-cur').textContent = p.next_followup ? 'Currently: ' + p.next_followup : 'Currently: none set';
+    $('l-msg').textContent = ''; $('l-msg').classList.remove('bad'); typeChanged();
+    $('logSheet').classList.remove('hidden'); $('logSheet').scrollTop = 0;
+  }
+  function typeChanged() {
+    const t = $('l-type').value;
+    $('l-dirwrap').classList.toggle('hidden', !DIRECTION_TYPES.includes(t));
+    $('l-fuwrap').classList.toggle('hidden', t === 'Meeting'); // the Meetings database has no such flag
+  }
+  $('l-type').onchange = typeChanged;
+  document.querySelectorAll('[data-ldate]').forEach((b) => { b.onclick = () => { $('l-date').value = plusDays(Number(b.dataset.ldate)); }; });
+  $('l-close').onclick = () => $('logSheet').classList.add('hidden');
+  $('pv-log').onclick = () => { if (current) openLog(current); };
+  $('l-save').onclick = async () => {
+    if (!current) return;
+    const p = current, type = $('l-type').value;
+    const body = { type, person_ids: [p.id], date: $('l-date').value || today(), today: today(), title: $('l-title').value.trim(), summary: $('l-summary').value.trim(), direction: DIRECTION_TYPES.includes(type) ? $('l-dir').value : '', needs_followup: type !== 'Meeting' && $('l-fu').checked };
+    $('l-save').disabled = true; $('l-msg').classList.remove('bad'); $('l-msg').textContent = 'Saving to Notion…';
+    try {
+      const { logged } = await api('/interactions/create', { method: 'POST', body: JSON.stringify(body) });
+      store.set('cc.log.type', type);
+      const n = $('l-next').value;
+      if (n !== 'keep') {
+        const { person } = await api('/people/update', { method: 'POST', body: JSON.stringify({ id: p.id, today: today(), next_followup: n === 'clear' ? '' : plusDays(Number(n)) }) });
+        state.items[person.id] = norm(person); await persist(); render();
+      }
+      history.delete(p.id); stale = true;
+      $('logSheet').classList.add('hidden');
+      openSheet(state.items[p.id] || p);
+      $('p-vmsg').textContent = 'Logged: ' + logged.title + ' (' + logged.date + ').';
+    } catch (e) { $('l-msg').classList.add('bad'); $('l-msg').textContent = 'Not saved: ' + e.message; }
+    $('l-save').disabled = false;
+  };
+
   $('pv-addtask').onclick = () => { if (!current || !window.CCTasks) return; const p = current; closeSheet(); CCTasks.startAdd({ id: p.id, name: p.name }); };
   async function loadHistory(p) {
     const box = $('pv-history');

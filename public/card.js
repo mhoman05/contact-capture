@@ -254,6 +254,9 @@
     window.scrollTo(0, 0);
   }
   window.CCTab = tab;
+  // The letter headings of the lists stick right below the fixed tab bar, whatever its height.
+  const fitBar = () => document.documentElement.style.setProperty('--topH', document.querySelector('.topbar').offsetHeight + 'px');
+  fitBar(); window.addEventListener('resize', fitBar);
   // The number on the app icon: people to follow up plus tasks due, each tab reports its own count.
   window.CCBadge = {
     parts: {},

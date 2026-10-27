@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { runCapture } from './capture';
 import { DEFAULT_MODEL, ExtractionError, extractContacts } from './extract';
+import { logInteraction, parseLog } from './interactions';
 import { checkNotion } from './status';
 import { companyHistory, createCompany, listCompanies, parseCompanyFields, parseCompanyUpdate, updateCompany } from './companies';
 import { createTask, deleteTask, listTasks, parseTaskCreate, parseTaskUpdate, updateTask } from './tasks';
@@ -8,7 +9,7 @@ import { vcardResponse } from './vcard';
 import { createEvent, getEvent, listEvents, parseNewEvent } from './events';
 import { readMe, updateMeValue } from './me';
 import { deletePerson, findDuplicates, listPeople, mergePeople, parsePatch, personHistory, recentPeople, updatePersonFields } from './people';
-import { NotionClient, NotionError } from './notion';
+import { NotionClient, NotionError, pageTitle } from './notion';
 import { cleanEmail, cleanLinkedInLink, cleanPhone, cleanTelegram, cleanWebsite, nonEmpty } from './normalize';
 import type { CaptureImage, CaptureRequest, Env, ManualContact } from './types';
 
@@ -214,6 +215,41 @@ async function handlePeople(req: Request, env: Env, url: URL, cors: Record<strin
   }
 }
 
+/** Log a meeting or interaction with people, from a person's screen. */
+async function handleLog(req: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const raw = await req.text();
+  if (raw.length > 20_000) return json({ error: 'Request too large.' }, 413, cors);
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return json({ error: 'Body is not valid JSON.' }, 400, cors);
+  }
+  const b = (body ?? {}) as Record<string, unknown>;
+  const today = typeof b.today === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.today) ? b.today : new Date().toISOString().slice(0, 10);
+  const f = parseLog(body, today);
+  if (typeof f === 'string') return json({ error: f }, 400, cors);
+  const notion = new NotionClient(env.NOTION_TOKEN);
+  try {
+    // The people must be rows of the People database, and their names make the title.
+    const names: string[] = [];
+    for (const id of f.person_ids) {
+      const page = await notion.getPage(id);
+      if (!page.parent?.database_id || page.parent.database_id.replace(/-/g, '').toLowerCase() !== env.NOTION_PEOPLE_DB.replace(/-/g, '').toLowerCase()) {
+        return json({ error: 'That person is not in your People database.' }, 404, cors);
+      }
+      names.push(pageTitle(page, 'Name'));
+    }
+    const logged = await logInteraction({ notion, interactionsDb: env.NOTION_INTERACTIONS_DB, meetingsDb: env.NOTION_MEETINGS_DB }, f, names.length > 2 ? `${names[0]} and ${names.length - 1} others` : names.join(' and '));
+    return json({ logged }, 200, cors);
+  } catch (err) {
+    if (err instanceof NotionError) return json({ error: err.message }, err.status, cors);
+    if (err instanceof Error && /not configured/.test(err.message)) return json({ error: err.message }, 503, cors);
+    console.error(err);
+    return json({ error: 'Unexpected error.' }, 500, cors);
+  }
+}
+
 /** The Companies database: list (paged, incremental), history, create and change. */
 async function handleCompanies(req: Request, env: Env, url: URL, cors: Record<string, string>): Promise<Response> {
   const deps = { notion: new NotionClient(env.NOTION_TOKEN), companiesDb: env.NOTION_COMPANIES_DB, interactionsDb: env.NOTION_INTERACTIONS_DB, meetingsDb: env.NOTION_MEETINGS_DB };
@@ -328,7 +364,7 @@ export default {
     // A contact card shared from "My QR": open to save the contact. Public, see vcard.ts.
     if (url.pathname === '/v') return req.method === 'GET' ? vcardResponse(url.searchParams.get('c'), url.searchParams.get('f') === '1') : json({ error: 'Use GET.' }, 405);
     // Everything else is a static file of the app.
-    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/recent': 'GET', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST', '/people/list': 'GET', '/people/history': 'GET', '/status': 'GET', '/tasks/list': 'GET', '/tasks/create': 'POST', '/tasks/update': 'POST', '/tasks/delete': 'POST', '/companies/list': 'GET', '/companies/history': 'GET', '/companies/create': 'POST', '/companies/update': 'POST' };
+    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/recent': 'GET', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST', '/people/list': 'GET', '/people/history': 'GET', '/status': 'GET', '/tasks/list': 'GET', '/tasks/create': 'POST', '/tasks/update': 'POST', '/tasks/delete': 'POST', '/companies/list': 'GET', '/companies/history': 'GET', '/companies/create': 'POST', '/companies/update': 'POST', '/interactions/create': 'POST' };
     const method = API[url.pathname];
     if (!method) {
       return env.ASSETS ? env.ASSETS.fetch(req) : json({ error: 'Not found.' }, 404, cors);
@@ -346,6 +382,7 @@ export default {
 
     if (url.pathname === '/me' || url.pathname === '/me/update') return handleMe(req, env, url.pathname, cors);
     if (url.pathname === '/status') return json(await checkNotion(new NotionClient(env.NOTION_TOKEN), env), 200, cors);
+    if (url.pathname === '/interactions/create') return handleLog(req, env, cors);
     if (url.pathname.startsWith('/companies/')) return handleCompanies(req, env, url, cors);
     if (url.pathname.startsWith('/tasks/')) return handleTasks(req, env, url, cors);
     if (url.pathname.startsWith('/people/')) return handlePeople(req, env, url, cors);
