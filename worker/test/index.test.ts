@@ -488,11 +488,32 @@ describe('share link for the contact card', () => {
   const card = 'BEGIN:VCARD\r\nVERSION:3.0\r\nN:Durán;Álvaro;;;\r\nFN:Álvaro Durán\r\nORG:Acme\\, Inc\r\nTITLE:CEO\r\nTEL;TYPE=WORK,VOICE:+34 600 111 222\r\nEMAIL;TYPE=WORK,INTERNET:a@acme.com\r\nURL:https://linkedin.com/in/alvaro\r\nitem1.URL:https://golf.example/book\r\nitem1.X-ABLabel:Indoor Golf\r\nADR;TYPE=WORK:;;Calle 1\\, Madrid;;;;\r\nNOTE:Founder\\, Indoor Golf\r\nEND:VCARD\r\n';
   const get = (c: string | null, method = 'GET') => call(c === null ? '/v' : `/v?c=${c}`, { method });
 
-  it('returns the card as a .vcf without any access token', async () => {
+  it('opens a page with the details and an "Add to contacts" button, without any access token', async () => {
     const res = await get(b64(card));
     expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/html');
+    expect(res.headers.get('Content-Security-Policy')).toContain("default-src 'none'");
+    const html = await res.text();
+    expect(html).toContain('Álvaro Durán');
+    expect(html).toContain('CEO · Acme, Inc');
+    expect(html).toContain('href="tel:+34600111222"');
+    expect(html).toContain('mailto:a@acme.com');
+    expect(html).toContain('Indoor Golf'); // the club label
+    expect(html).toContain(`href="/v?c=${b64(card)}&amp;f=1"`);
+    expect(html).toContain('Add to contacts');
+  });
+  it('escapes everything it shows', async () => {
+    const evil = card.replace('FN:Álvaro Durán', 'FN:<img src=x onerror=alert(1)>').replace('NOTE:Founder\\, Indoor Golf', 'NOTE:<script>alert(1)</script>');
+    const html = await (await get(b64(evil))).text();
+    expect(html).not.toContain('<img src=x');
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+  it('with f=1 returns the contact file as a download', async () => {
+    const res = await call(`/v?c=${b64(card)}&f=1`);
+    expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toContain('text/vcard');
-    expect(res.headers.get('Content-Disposition')).toBe('inline; filename="Alvaro-Duran.vcf"');
+    expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="Alvaro-Duran.vcf"');
     const body = await res.text();
     expect(body).toContain('FN:Álvaro Durán');
     expect(body).toContain('item1.X-ABLabel:Indoor Golf');

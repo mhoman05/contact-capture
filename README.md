@@ -116,7 +116,7 @@ The **My QR card** tab turns your details into a QR code that the other person s
 - **Your details live in Notion**, in the database **My sharing details** (under the Work CRM page). Each row is one detail: its **Value**, a **Type** (First name, Last name, Company, Role, Phone, Email, Website, Address) and the **Groups** it belongs to (Personal, Professional, Indoor golf club; one row can be in several). Rows with an empty Value are ignored. Add your own rows or groups in Notion whenever you like.
 - **In the app you choose what to share right now.** Tick a group to include its details, then tick or untick single details for this person. The code updates immediately. **Edit values** changes a value and saves it back to Notion; **Reload from Notion** pulls changes made there (the tab also reloads each time you open it).
 - Professional and club can both be ticked: the first company becomes the company and role on the card; the other is added in the note, and its phone, email and website carry its name as a label (or the row's **Label**, if you set one), so they do not look like a second work number.
-- **Show full screen** gives a big white code and keeps the screen on. **Share link** opens the phone's share sheet (WhatsApp, Telegram, SMS, email …) with a link; whoever opens it gets *Add contact* with the details you ticked, no scanning and no app needed. The contact card is inside the link and the service hands it back as a `.vcf` (the address `/v?c=…` is public on purpose and can only ever return a plain contact card; nothing is stored, but the link contains the ticked details, so share it only with people you want to have them). **Save contact file** just downloads the `.vcf` (Android Chrome cannot hand `.vcf` files to the share sheet).
+- **Show full screen** gives a big white code and keeps the screen on. **Share link** opens the phone's share sheet (WhatsApp, Telegram, SMS, email …) with a link; whoever opens it sees a small page with your name and the details you ticked and a big **Add to contacts** button, which downloads the contact file; their phone then offers to save it to their contacts (if nothing opens, they tap the file in their Downloads). No scanning and no app needed. The contact card is inside the link (the address `/v?c=…` is public on purpose, shows only what is in the link, escapes everything, and can only ever return a plain contact card; nothing is stored, but the link contains the ticked details, so share it only with people you want to have them). **Save contact file** just downloads the `.vcf` (Android Chrome cannot hand `.vcf` files to the share sheet).
 - The phone keeps the last copy it loaded, so the code still works with no signal.
 - Long-press the installed app icon and choose **My QR card** for a one-tap shortcut (Android may need a day to pick it up).
 - The code is a standard vCard 3.0. The more you tick, the denser the code; the app warns when it gets hard to scan.
@@ -147,7 +147,7 @@ The app itself is in GitHub and Cloudflare, and your contacts and details are in
 cd worker
 npm ci
 npm run typecheck
-npm test            # 99 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
+npm test            # 101 tests: matching rules, Notion writes (against an in-memory Notion), access control, serving the app
 ```
 
 Run everything locally with `npx wrangler@4 dev`, putting the three secrets in `worker/.dev.vars` (git-ignored), then open `http://127.0.0.1:8787/`.
