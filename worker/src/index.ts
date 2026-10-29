@@ -20,6 +20,11 @@ const MAX_IMAGES = 12; // a bulk run after a conference
 const MAX_IMAGE_B64 = 6 * 1024 * 1024; // base64 characters per image (the app downsizes to well under this)
 const MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
+/** Notion's paging cursors are opaque and can be long and contain characters such as + / : ; it only goes into a JSON body to Notion, so any printable text is fine. */
+export function isValidCursor(c: string): boolean {
+  return /^[\x21-\x7e]{1,2000}$/.test(c);
+}
+
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -186,7 +191,7 @@ async function handlePeople(req: Request, env: Env, url: URL): Promise<Response>
     if (url.pathname === '/people/list') {
       const since = url.searchParams.get('since') ?? undefined;
       const cursor = url.searchParams.get('cursor') ?? undefined;
-      if ((since && Number.isNaN(Date.parse(since))) || (cursor && !/^[0-9A-Za-z-_%=.]{1,200}$/.test(cursor))) return json({ error: 'Bad since or cursor.' }, 400);
+      if ((since && Number.isNaN(Date.parse(since))) || (cursor && !isValidCursor(cursor))) return json({ error: 'Bad since or cursor.' }, 400);
       return json(await listPeople(deps, { since, cursor }), 200);
     }
     if (url.pathname === '/people/history') {
@@ -272,7 +277,7 @@ async function handleCompanies(req: Request, env: Env, url: URL): Promise<Respon
     if (url.pathname === '/companies/list') {
       const since = url.searchParams.get('since') ?? undefined;
       const cursor = url.searchParams.get('cursor') ?? undefined;
-      if ((since && Number.isNaN(Date.parse(since))) || (cursor && !/^[0-9A-Za-z-_%=.]{1,200}$/.test(cursor))) return json({ error: 'Bad since or cursor.' }, 400);
+      if ((since && Number.isNaN(Date.parse(since))) || (cursor && !isValidCursor(cursor))) return json({ error: 'Bad since or cursor.' }, 400);
       return json(await listCompanies(deps, { since, cursor }), 200);
     }
     if (url.pathname === '/companies/history') {
@@ -312,7 +317,7 @@ async function handleTasks(req: Request, env: Env, url: URL): Promise<Response> 
     if (url.pathname === '/tasks/list') {
       const since = url.searchParams.get('since') ?? undefined;
       const cursor = url.searchParams.get('cursor') ?? undefined;
-      if ((since && Number.isNaN(Date.parse(since))) || (cursor && !/^[0-9A-Za-z-_%=.]{1,200}$/.test(cursor))) return json({ error: 'Bad since or cursor.' }, 400);
+      if ((since && Number.isNaN(Date.parse(since))) || (cursor && !isValidCursor(cursor))) return json({ error: 'Bad since or cursor.' }, 400);
       return json(await listTasks(deps, { since, cursor }), 200);
     }
     const raw = await req.text();

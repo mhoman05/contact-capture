@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import worker, { parseRequest } from '../src/index';
+import worker, { isValidCursor, parseRequest } from '../src/index';
 import type { Env } from '../src/types';
 import { FakeNotion, rich, title } from './fake-notion';
 
@@ -425,6 +425,28 @@ describe('browsing people', () => {
     const first = all.find((p) => p.name === 'Person 0');
     expect(first).toMatchObject({ tier: 'A - Key', contact_type: ['Client'] });
     expect(first.edited).toMatch(/^2026-/);
+  });
+
+  it('accepts the opaque, long cursors Notion hands out (with + / : =) and passes them on unchanged', async () => {
+    const opaque = 'AbC+dEf/gh:ij==' + 'x'.repeat(300);
+    const startCursors: unknown[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((i: any, n: any) => {
+      if (n?.body) startCursors.push(JSON.parse(String(n.body)).start_cursor);
+      return notion.fetch(i, n);
+    }) as typeof fetch;
+    try {
+      for (const path of ['/people/list', '/companies/list']) { // (the tasks route uses the same check)
+        const res = await worker.fetch(new Request(`https://w.test${path}?cursor=${encodeURIComponent(opaque)}`, { headers: authed }), bEnv);
+        expect(res.status, path).toBe(200);
+      }
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(startCursors.filter((c) => c === opaque).length).toBeGreaterThanOrEqual(2);
+    expect(isValidCursor('')).toBe(false);
+    expect(isValidCursor('has space')).toBe(false);
+    expect(isValidCursor('x'.repeat(2001))).toBe(false);
   });
 
   it('with since, returns only people edited after it', async () => {
