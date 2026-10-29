@@ -7,6 +7,7 @@ import { companyHistory, createCompany, listCompanies, parseCompanyFields, parse
 import { createTask, deleteTask, listTasks, parseTaskCreate, parseTaskUpdate, updateTask } from './tasks';
 import { vcardResponse } from './vcard';
 import { lookup, parseLookupRequest } from './lookup';
+import { exportInteractions, exportMeetings } from './export';
 import { GoogleError, parseGoogleContact, saveToGoogle } from './google';
 import { createEvent, getEvent, listEvents, parseNewEvent } from './events';
 import { readMe, updateMeValue } from './me';
@@ -130,6 +131,22 @@ async function handleMe(req: Request, env: Env, path: string): Promise<Response>
     }
     const item = await updateMeValue(notion, env.NOTION_ME_DB, body.id, body.value.trim().slice(0, 1900));
     return item ? json({ item }, 200) : json({ error: 'That row is not in My sharing details.' }, 404);
+  } catch (err) {
+    if (err instanceof NotionError) return json({ error: err.message }, err.status);
+    console.error(err);
+    return json({ error: 'Unexpected error.' }, 500);
+  }
+}
+
+/** A page of Interactions or Meetings for the backup. */
+async function handleExport(env: Env, url: URL): Promise<Response> {
+  const cursor = url.searchParams.get('cursor') ?? undefined;
+  if (cursor && !isValidCursor(cursor)) return json({ error: 'Bad cursor.' }, 400);
+  const notion = new NotionClient(env.NOTION_TOKEN);
+  try {
+    if (url.pathname === '/export/interactions') return json(await exportInteractions(notion, env.NOTION_INTERACTIONS_DB, cursor), 200);
+    if (!env.NOTION_MEETINGS_DB) return json({ rows: [], next_cursor: null }, 200); // no Meetings database configured: nothing to back up
+    return json(await exportMeetings(notion, env.NOTION_MEETINGS_DB, cursor), 200);
   } catch (err) {
     if (err instanceof NotionError) return json({ error: err.message }, err.status);
     console.error(err);
@@ -318,7 +335,7 @@ async function handleTasks(req: Request, env: Env, url: URL): Promise<Response> 
       const since = url.searchParams.get('since') ?? undefined;
       const cursor = url.searchParams.get('cursor') ?? undefined;
       if ((since && Number.isNaN(Date.parse(since))) || (cursor && !isValidCursor(cursor))) return json({ error: 'Bad since or cursor.' }, 400);
-      return json(await listTasks(deps, { since, cursor }), 200);
+      return json(await listTasks(deps, { since, cursor, all: url.searchParams.get('all') === '1' }), 200);
     }
     const raw = await req.text();
     if (raw.length > 20_000) return json({ error: 'Request too large.' }, 413);
@@ -383,7 +400,7 @@ export default {
     // A contact card shared from "My QR": open to save the contact. Public, see vcard.ts.
     if (url.pathname === '/v') return req.method === 'GET' ? vcardResponse(url.searchParams.get('c'), url.searchParams.get('f') === '1') : json({ error: 'Use GET.' }, 405);
     // Everything else is a static file of the app.
-    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST', '/people/list': 'GET', '/people/history': 'GET', '/status': 'GET', '/tasks/list': 'GET', '/tasks/create': 'POST', '/tasks/update': 'POST', '/tasks/delete': 'POST', '/companies/list': 'GET', '/companies/history': 'GET', '/companies/create': 'POST', '/companies/update': 'POST', '/interactions/create': 'POST', '/contacts/google': 'POST', '/scan/lookup': 'POST' };
+    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST', '/people/list': 'GET', '/people/history': 'GET', '/status': 'GET', '/tasks/list': 'GET', '/tasks/create': 'POST', '/tasks/update': 'POST', '/tasks/delete': 'POST', '/companies/list': 'GET', '/companies/history': 'GET', '/companies/create': 'POST', '/companies/update': 'POST', '/interactions/create': 'POST', '/contacts/google': 'POST', '/scan/lookup': 'POST', '/export/interactions': 'GET', '/export/meetings': 'GET' };
     const method = API[url.pathname];
     if (!method) {
       return env.ASSETS ? env.ASSETS.fetch(req) : json({ error: 'Not found.' }, 404);
@@ -402,6 +419,7 @@ export default {
     if (url.pathname === '/interactions/create') return handleLog(req, env);
     if (url.pathname === '/contacts/google') return handleGoogleContact(req, env);
     if (url.pathname === '/scan/lookup') return handleLookup(req);
+    if (url.pathname.startsWith('/export/')) return handleExport(env, url);
     if (url.pathname.startsWith('/companies/')) return handleCompanies(req, env, url);
     if (url.pathname.startsWith('/tasks/')) return handleTasks(req, env, url);
     if (url.pathname.startsWith('/people/')) return handlePeople(req, env, url);

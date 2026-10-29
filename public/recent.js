@@ -27,16 +27,25 @@
   const dismissed = (() => { try { return new Set(JSON.parse(store.get('cc.dupe.no', '[]'))); } catch { return new Set(); } })();
   const pairKey = (p) => [p.a.id, p.b.id].sort().join('|');
 
+  // The day of the last contact; for someone with none logged yet, the day they were added.
+  const lastSeen = (p) => p.last_contact || (p.created || '').slice(0, 10);
+  const ageText = (p) => (p.last_contact ? 'last contact ' + agoDay(p.last_contact) : 'no contact logged');
   const due = (p) => !!p.next_followup && p.next_followup <= today();
   function updateBadge() {
     const n = all().filter(due).length;
     $('tabRecent').textContent = n ? 'People (' + n + ')' : 'People';
     if (window.CCBadge) CCBadge.set('people', n);
   }
+  const words = (d, date) => (d <= 0 ? 'today' : d === 1 ? 'yesterday' : d < 30 ? d + ' days ago' : d < 365 ? Math.max(1, Math.round(d / 30)) + (Math.max(1, Math.round(d / 30)) === 1 ? ' month ago' : ' months ago') : date.toLocaleDateString());
   function ago(iso) {
     if (!iso) return '';
-    const d = Math.floor((Date.now() - new Date(iso)) / 864e5);
-    return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d < 30 ? d + ' days ago' : new Date(iso).toLocaleDateString();
+    const date = new Date(iso);
+    return words(Math.floor((Date.now() - date) / 864e5), date);
+  }
+  /** "3 days ago" for a YYYY-MM-DD, counted in calendar days (not hours since noon). */
+  function agoDay(day) {
+    const [y, m, d] = day.split('-').map(Number), date = new Date(y, m - 1, d), now = new Date();
+    return words(Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - date) / 864e5), date);
   }
   const setStatus = (msg, bad) => { const s = $('recStatus'); s.textContent = msg; s.classList.toggle('bad', !!bad); };
   const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -44,18 +53,24 @@
   async function api(path, init = {}) {
     const c = cfg();
     if (!c.tok) throw new Error('Connect the service first: open Add and tap ⚙.');
-    const res = await fetch(c.url + path, { ...init, headers: { Authorization: 'Bearer ' + c.tok, 'Content-Type': 'application/json' } });
+    let res;
+    try { res = await fetch(c.url + path, { ...init, headers: { Authorization: 'Bearer ' + c.tok, 'Content-Type': 'application/json' } }); }
+    catch { const err = new Error('No connection.'); err.retryable = true; throw err; }
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) throw new Error('The access token was not accepted. Check it under ⚙ on Add.');
-    if (!res.ok) throw new Error(data.error || 'Something went wrong (' + res.status + ').');
+    if (!res.ok) { const err = new Error(data.error || 'Something went wrong (' + res.status + ').'); err.retryable = res.status === 429 || res.status >= 500; throw err; }
     return data;
   }
-  const norm = (p) => ({ ...p, events: p.events || [], contact_type: p.contact_type || [], tier: p.tier || '', notes: p.notes || '' });
+  const norm = (p) => ({ ...p, events: p.events || [], contact_type: p.contact_type || [], tier: p.tier || '', notes: p.notes || '', last_contact: p.last_contact || '' });
   const persist = () => kvSet(state);
 
   // ---- syncing ---------------------------------------------------------------------
   async function sync(full) {
     if (syncing) return;
+    if (window.CCOutbox) {
+      await CCOutbox.flush();
+      if (CCOutbox.count('person')) { renderOutbox(); return; } // edits are still waiting: reading now would overwrite them on this phone
+    }
     syncing = true;
     const started = new Date().toISOString();
     const doFull = full || !state.syncedAt || Date.now() - Date.parse(state.fullAt || 0) > 864e5; // everything again once a day, to notice people deleted in Notion
@@ -81,10 +96,12 @@
   // ---- the list ---------------------------------------------------------------------
   function visible() {
     const q = fold($('recFilter').value.trim());
-    let list = all().filter((p) => (ui.filter === 'review' ? p.needs_review : ui.filter === 'due' ? due(p) : true))
+    const quietBefore = plusDays(-90);
+    let list = all().filter((p) => (ui.filter === 'review' ? p.needs_review : ui.filter === 'due' ? due(p) : ui.filter === 'quiet' ? lastSeen(p) < quietBefore : true))
       .filter((p) => !ui.tier || (ui.tier === 'none' ? !p.tier : p.tier === ui.tier))
       .filter((p) => !q || fold([p.name, p.company, p.role, p.email, p.phone, p.how, p.notes, p.events.join(' '), p.location, p.tier].join(' ')).includes(q));
     if (ui.filter === 'due') list.sort((a, b) => a.next_followup.localeCompare(b.next_followup));
+    else if (ui.filter === 'quiet' || ui.sort === 'quiet') list.sort((a, b) => lastSeen(a).localeCompare(lastSeen(b)));
     else if (ui.sort === 'new') list.sort((a, b) => (b.created || '').localeCompare(a.created || ''));
     else list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     return list;
@@ -97,9 +114,11 @@
     for (const id of ['recList', 'recFilter', 'recTools', 'recCount']) $(id).classList.toggle('hidden', dupMode);
     $('dupList').classList.toggle('hidden', !dupMode);
     $('recSort').value = ui.sort; $('recTier').value = ui.tier;
+    const quiet = all().filter((p) => lastSeen(p) < plusDays(-90)).length;
+    $('recChips').querySelector('[data-f=quiet]').textContent = 'Quiet 90+ days' + (quiet ? ' (' + quiet + ')' : '');
     $('recChips').querySelector('[data-f=due]').textContent = 'Follow up' + (all().filter(due).length ? ' (' + all().filter(due).length + ')' : '');
     $('recChips').querySelector('[data-f=review]').textContent = 'To review' + (all().some((p) => p.needs_review) ? ' (' + all().filter((p) => p.needs_review).length + ')' : '');
-    updateBadge();
+    updateBadge(); renderOutbox();
     if (dupMode) { renderDupes(); return; }
 
     const list = visible();
@@ -113,7 +132,7 @@
         if (head !== letter) { letter = head; box.append(el('div', 'muted letter', head)); }
       }
       const b = el('button', 'person'); b.type = 'button';
-      const top = el('div', 'ptop'); top.append(el('b', '', p.name), el('span', 'muted', ui.sort === 'new' || ui.filter === 'due' ? ago(p.created) : ''));
+      const top = el('div', 'ptop'); top.append(el('b', '', p.name), el('span', 'muted', ui.sort === 'new' ? 'added ' + ago(p.created) : ageText(p)));
       b.append(top);
       const sub = [p.company, p.role].filter(Boolean).join(' · ');
       if (sub) b.append(el('div', 'muted', sub));
@@ -134,6 +153,8 @@
   const pid = (k) => (k === 'phone' ? 'p-phone-field' : 'p-' + k);
   const FIELDS = ['name', 'company', 'role', 'phone', 'email', 'linkedin', 'telegram', 'location'];
   const history = new Map();
+  let lastEl = null;
+  const lastText = (d) => (d ? new Date(d + 'T12:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + ' (' + agoDay(d) + ')' : 'None logged yet');
 
   function line(label, value, href) {
     const row = el('div', 'kv'); row.append(el('span', 'muted', label));
@@ -149,6 +170,7 @@
     if (due(p)) tags.append(el('span', 'tag due', 'Follow up ' + (p.next_followup < today() ? 'overdue' : 'today')));
     else if (p.next_followup) tags.append(el('span', 'tag', 'Follow up ' + p.next_followup));
     if (p.needs_review) tags.append(el('span', 'tag', 'Needs review'));
+    if (p._pending) tags.append(el('span', 'tag due', 'Waiting to be sent'));
     const acts = $('p-actions'); acts.replaceChildren();
     const link = (label, href) => { const a = el('a', 'btn', label); a.href = href; a.target = '_blank'; a.rel = 'noopener'; acts.append(a); };
     if (p.phone) { link('📞 Call', 'tel:' + p.phone.replace(/[^\d+]/g, '')); link('💬 WhatsApp', 'https://wa.me/' + p.phone.replace(/\D/g, '')); }
@@ -164,6 +186,7 @@
     if (p.location) info.append(line('Location', p.location));
     if (p.how) info.append(line('How we met', p.how));
     if (p.events.length) info.append(line('Events', p.events.join(', ')));
+    lastEl = line('Last contact', lastText(p.last_contact)); info.append(lastEl);
     if (p.next_followup) info.append(line('Next follow-up', p.next_followup));
     if (p.created) info.append(line('Added', new Date(p.created).toLocaleDateString()));
     if (!info.childNodes.length) info.append(el('div', 'muted', 'No contact details yet. Tap Edit to add some.'));
@@ -203,24 +226,47 @@
   document.querySelectorAll('[data-ldate]').forEach((b) => { b.onclick = () => { $('l-date').value = plusDays(Number(b.dataset.ldate)); }; });
   $('l-close').onclick = () => $('logSheet').classList.add('hidden');
   $('pv-log').onclick = () => { if (current) openLog(current); };
+  /** A just-logged entry, shown at once in the person's history and counted as their last contact. */
+  function localLog(p, body, logged) {
+    const item = { kind: body.type === 'Meeting' ? 'meeting' : 'interaction', title: (logged && logged.title) || body.title || body.type + ' with ' + p.name, type: body.type, date: body.date, summary: body.summary, url: (logged && logged.url) || '', pending: !logged };
+    if (logged) history.delete(p.id); // read again from Notion, with the link to the page
+    else if (history.has(p.id)) history.set(p.id, [item, ...history.get(p.id)].sort((a, b) => b.date.localeCompare(a.date)));
+    const q = { ...(state.items[p.id] || p) };
+    if (body.date <= today() && body.date > (q.last_contact || '')) q.last_contact = body.date;
+    state.items[p.id] = q;
+    return q;
+  }
   $('l-save').onclick = async () => {
     if (!current) return;
     const p = current, type = $('l-type').value;
     const body = { type, person_ids: [p.id], date: $('l-date').value || today(), today: today(), title: $('l-title').value.trim(), summary: $('l-summary').value.trim(), direction: DIRECTION_TYPES.includes(type) ? $('l-dir').value : '', needs_followup: type !== 'Meeting' && $('l-fu').checked };
+    const n = $('l-next').value;
+    const followBody = n !== 'keep' ? { id: p.id, today: today(), next_followup: n === 'clear' ? '' : plusDays(Number(n)) } : null;
     $('l-save').disabled = true; $('l-msg').classList.remove('bad'); $('l-msg').textContent = 'Saving to Notion…';
+    let logged = null, queued = false;
     try {
-      const { logged } = await api('/interactions/create', { method: 'POST', body: JSON.stringify(body) });
-      store.set('cc.log.type', type);
-      const n = $('l-next').value;
-      if (n !== 'keep') {
-        const { person } = await api('/people/update', { method: 'POST', body: JSON.stringify({ id: p.id, today: today(), next_followup: n === 'clear' ? '' : plusDays(Number(n)) }) });
-        state.items[person.id] = norm(person); await persist(); render();
+      ({ logged } = await api('/interactions/create', { method: 'POST', body: JSON.stringify(body) }));
+    } catch (e) {
+      if (!e.retryable) { $('l-msg').classList.add('bad'); $('l-msg').textContent = 'Not saved: ' + e.message; $('l-save').disabled = false; return; }
+      CCOutbox.add({ kind: 'log', path: '/interactions/create', body, label: type + ' with ' + p.name, personId: p.id }); queued = true;
+    }
+    store.set('cc.log.type', type);
+    let q = localLog(p, body, logged);
+    if (followBody) {
+      try {
+        if (queued) throw Object.assign(new Error('waiting'), { retryable: true }); // keep the order: the log first, then the follow-up date
+        const { person } = await api('/people/update', { method: 'POST', body: JSON.stringify(followBody) });
+        q = { ...norm(person), last_contact: q.last_contact };
+      } catch (e) {
+        if (e.retryable) { CCOutbox.add({ kind: 'person', path: '/people/update', body: followBody, label: 'Follow-up date for ' + p.name, personId: p.id }); q = applyPatch(q, followBody); queued = true; }
+        else { $('p-vmsg').textContent = 'Logged, but the follow-up date was not saved: ' + e.message; }
       }
-      history.delete(p.id); stale = true;
-      $('logSheet').classList.add('hidden');
-      openSheet(state.items[p.id] || p);
-      $('p-vmsg').textContent = 'Logged: ' + logged.title + ' (' + logged.date + ').';
-    } catch (e) { $('l-msg').classList.add('bad'); $('l-msg').textContent = 'Not saved: ' + e.message; }
+    }
+    state.items[p.id] = q; await persist(); render();
+    if (logged) stale = true;
+    $('logSheet').classList.add('hidden');
+    openSheet(q);
+    $('p-vmsg').textContent = queued ? 'No signal: saved on this phone. It goes to Notion by itself when you are online.' : 'Logged: ' + logged.title + ' (' + logged.date + ').';
     $('l-save').disabled = false;
   };
 
@@ -228,12 +274,14 @@
   async function loadHistory(p) {
     const box = $('pv-history');
     const draw = (items) => {
+      const best = items.filter((h) => h.date && h.date <= today()).map((h) => h.date).concat(p.last_contact || '').sort().at(-1) || '';
+      if (lastEl && current && current.id === p.id && best !== (p.last_contact || '')) lastEl.lastChild.textContent = lastText(best);
       box.replaceChildren();
       if (!items.length) { box.append(el('div', 'muted', 'No meetings or interactions logged yet.')); return; }
       for (const h of items) {
         const row = el('div', 'kv');
         row.append(el('span', 'muted', h.date || '—'));
-        const t = el('span'); t.append(el('b', '', h.title), el('span', 'muted', ' · ' + h.type));
+        const t = el('span'); t.append(el('b', '', h.title), el('span', 'muted', ' · ' + h.type)); if (h.pending) t.append(el('span', 'tag due', 'Waiting to be sent'));
         // Emails logged from Gmail carry a link to the thread; show it as a button and keep the text short.
         const mail = (h.summary || '').match(/https:\/\/mail\.google\.com\/\S+/);
         const text = (h.summary || '').replace(/\s*Auto-logged from Gmail:.*$/s, '').trim();
@@ -269,6 +317,21 @@
   $('p-edit').onclick = () => { setEditing(true); $('personSheet').scrollTop = 0; };
   $('p-cancel').onclick = () => { openSheet(current); };
 
+  // What a saved edit looks like on the phone before Notion has confirmed it (the service's answer replaces it later).
+  function applyPatch(p, patch) {
+    const q = { ...p, _pending: true };
+    for (const k of [...FIELDS, 'tier', 'needs_review', 'next_followup']) if (k in patch) q[k] = patch[k];
+    if (patch.note) { const line = (patch.today || today()) + ': ' + patch.note; q.notes = p.notes ? p.notes + '\n' + line : line; }
+    return q;
+  }
+  async function queuePersonEdit(p, body, label) {
+    const q = applyPatch(p, body);
+    state.items[p.id] = q; await persist();
+    CCOutbox.add({ kind: 'person', path: '/people/update', body, label, personId: p.id });
+    render();
+    return q;
+  }
+
   async function save(extra) {
     if (!current) return;
     const body = { id: current.id, today: today(), ...extra };
@@ -283,7 +346,13 @@
       const { person } = await api('/people/update', { method: 'POST', body: JSON.stringify(body) });
       state.items[person.id] = norm(person); await persist();
       render(); openSheet(state.items[person.id]); $('p-vmsg').textContent = 'Saved to Notion.';
-    } catch (e) { $('p-msg').classList.add('bad'); $('p-msg').textContent = 'Not saved: ' + e.message; }
+    } catch (e) {
+      if (e.retryable) {
+        // No signal (or the service has a hiccup): keep the change on the phone and send it later.
+        const q = await queuePersonEdit(current, body, 'Edit ' + current.name);
+        openSheet(q); $('p-vmsg').textContent = 'No signal: saved on this phone. It goes to Notion by itself when you are online.';
+      } else { $('p-msg').classList.add('bad'); $('p-msg').textContent = 'Not saved: ' + e.message; }
+    }
     $('p-save').disabled = false;
   }
   $('p-save').onclick = () => save({});
@@ -359,10 +428,44 @@
   $('recTier').onchange = () => { ui.tier = $('recTier').value; render(); };
   $('recReload').onclick = () => sync(true);
 
+  // ---- changes waiting to be sent, and notes about them ----------------------------------------------
+  function renderOutbox() {
+    const n = window.CCOutbox ? CCOutbox.count() : 0;
+    $('recOutbox').classList.toggle('hidden', !n);
+    $('recOutboxText').textContent = n ? (n === 1 ? '1 change is' : n + ' changes are') + ' waiting to be sent. They go to Notion by themselves when you are online.' : '';
+    const fails = window.CCOutbox ? CCOutbox.failures() : [];
+    const lastBackup = Number(store.get('cc.backup.at', '0')), snooze = Number(store.get('cc.backup.snooze', '0'));
+    const needBackup = all().length >= 20 && Date.now() - lastBackup > 30 * 864e5 && Date.now() > snooze;
+    let note = '', kind = '';
+    if (fails.length) { note = 'Not saved: ' + fails.map((f) => f.label + ' (' + f.message + ')').join('; ') + '.' + (fails.some((f) => f.kind === 'person' || f.kind === 'log') ? ' The list was read again from Notion.' : ''); kind = 'fail'; }
+    else if (needBackup) { note = lastBackup ? 'No backup for over 30 days.' : 'No backup yet.'; note += ' Open ⚙ Settings → Export everything.'; kind = 'backup'; }
+    $('recNote').classList.toggle('hidden', !note);
+    $('recNoteText').textContent = note; $('recNote').dataset.kind = kind;
+  }
+  $('recOutboxSend').onclick = async () => { $('recOutboxSend').disabled = true; await CCOutbox.flush(); $('recOutboxSend').disabled = false; };
+  $('recNoteOk').onclick = () => { if ($('recNote').dataset.kind === 'fail') CCOutbox.clearFailures(); else store.set('cc.backup.snooze', String(Date.now() + 7 * 864e5)); renderOutbox(); };
+  if (window.CCOutbox) {
+    CCOutbox.handle('person', {
+      done(op, data) { if (data.person) { state.items[data.person.id] = norm(data.person); persist(); render(); if (current && current.id === data.person.id && !editing) openSheet(state.items[data.person.id]); } },
+      failed() { stale = true; sync(true); },
+    });
+    CCOutbox.handle('log', {
+      done(op) {
+        history.delete(op.personId); stale = true;
+        const q = state.items[op.personId];
+        if (q && op.body.date <= today() && op.body.date > (q.last_contact || '')) { q.last_contact = op.body.date; persist(); render(); }
+        if (current && current.id === op.personId && !editing) loadHistory(current);
+      },
+      failed(op) { history.delete(op.personId); stale = true; sync(true); },
+    });
+    CCOutbox.onChange(() => { renderOutbox(); });
+    renderOutbox(); CCOutbox.flush();
+  }
+
   window.CCRecent = {
     people: () => all(),
     openPerson(id) { const p = state.items[id]; if (p) openSheet(p); },
-    show() { render(); if (!syncing && (stale || Date.now() - loadedAt > 60000)) sync(); },
+    show() { render(); if (window.CCOutbox) CCOutbox.flush(); if (!syncing && (stale || Date.now() - loadedAt > 60000)) sync(); },
     invalidate() { stale = true; },
     refreshBadge() { if (cfg().tok && !syncing && (stale || Date.now() - loadedAt > 300000)) sync(); else updateBadge(); },
   };

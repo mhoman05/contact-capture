@@ -260,6 +260,12 @@ describe('people', () => {
     const again = (await (await callP('/people/list', { headers: authed })).json()) as any;
     expect(again.people.find((x: any) => x.name === 'First Added').notes).toBe('2026-10-28: Called, wants a demo\n2026-10-29: Sent the deck');
   });
+  it('does not add the same dated note twice when a request is repeated', async () => {
+    const body = { id: second.id, today: '2026-11-01', note: 'Retry me' };
+    await update(body);
+    const { person } = (await (await update(body)).json()) as any;
+    expect(person.notes.split('\n').filter((l: string) => l === '2026-11-01: Retry me')).toHaveLength(1);
+  });
   it('clears a value when sent an empty string, and sets a new follow-up date', async () => {
     const { person: p } = (await (await update({ id: second.id, email: '', company: '', next_followup: '2026-11-10' })).json()) as any;
     expect(p).toMatchObject({ email: '', company: '', next_followup: '2026-11-10' });

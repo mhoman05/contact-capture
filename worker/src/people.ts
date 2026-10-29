@@ -23,6 +23,7 @@ export interface PersonItem {
   next_followup: string; // YYYY-MM-DD or ''
   created: string; // ISO time the person was added
   edited: string; // ISO time of the last edit in Notion
+  last_contact: string; // YYYY-MM-DD of the latest meeting, interaction or event with them (not in the future), or ''
 }
 
 export interface PeopleDeps {
@@ -36,7 +37,24 @@ export interface PeopleDeps {
 
 export const TIERS = ['A - Key', 'B - Important', 'C - Network'];
 
-export function toPerson(page: NotionPage, companies: Map<string, string>, events: Map<string, string>): PersonItem {
+/** A YYYY-MM-DD from a date, formula or rollup value (whatever shape Notion hands over), or ''. */
+function dateValue(prop: any): string {
+  const v = prop?.date?.start ?? prop?.formula?.date?.start ?? prop?.rollup?.date?.start ?? prop?.formula?.string ?? '';
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : '';
+}
+
+/**
+ * The latest day they were in touch: meetings, interactions (emails, calls …) and events they took part in all count.
+ * A meeting that is only planned does not (days after today are ignored; one day of slack covers time zones).
+ */
+export function lastContact(page: NotionPage, eventDates: Map<string, string>, now = new Date()): string {
+  const p = page.properties;
+  const limit = new Date(now.getTime() + 864e5).toISOString().slice(0, 10);
+  const found = [dateValue(p['Last Contacted']), dateValue(p['Latest Meeting']), dateValue(p['Latest Interaction']), ...(p.Events?.relation ?? []).map((r: any) => eventDates.get(r.id) ?? '')];
+  return found.filter((d) => d && d <= limit).sort().at(-1) ?? '';
+}
+
+export function toPerson(page: NotionPage, companies: Map<string, string>, events: Map<string, string>, eventDates: Map<string, string> = new Map()): PersonItem {
   const p = page.properties;
   return {
     id: page.id,
@@ -58,6 +76,7 @@ export function toPerson(page: NotionPage, companies: Map<string, string>, event
     next_followup: (p['Next Follow-up']?.date?.start ?? '').slice(0, 10),
     created: page.created_time ?? '',
     edited: page.last_edited_time ?? page.created_time ?? '',
+    last_contact: lastContact(page, eventDates),
   };
 }
 
@@ -65,8 +84,9 @@ async function lookups(d: PeopleDeps) {
   const companies = new Map<string, string>();
   for (const c of await d.notion.queryAll(d.companiesDb, 1000)) companies.set(c.id, pageTitle(c, 'Name'));
   const events = new Map<string, string>();
-  if (d.eventsDb) for (const e of await listEvents(d.notion, d.eventsDb)) events.set(e.id, e.name);
-  return { companies, events };
+  const eventDates = new Map<string, string>();
+  if (d.eventsDb) for (const e of await listEvents(d.notion, d.eventsDb)) { events.set(e.id, e.name); if (e.date) eventDates.set(e.id, e.date); }
+  return { companies, events, eventDates };
 }
 
 export interface PersonPatch {
@@ -155,11 +175,12 @@ export async function updatePersonFields(d: PeopleDeps, id: string, patch: Perso
   if (patch.note) {
     const current = plain(page.properties.Notes).trim();
     const line = `${today}: ${patch.note}`;
-    props.Notes = P.rich(truncate(current ? `${current}\n${line}` : line, 1900));
+    // A retry after a lost reply must not add the same line twice.
+    if (!current.split('\n').includes(line)) props.Notes = P.rich(truncate(current ? `${current}\n${line}` : line, 1900));
   }
   const updated = await d.notion.updatePage(id, props);
-  const { companies, events } = await lookups(d);
-  return toPerson(updated, companies, events);
+  const { companies, events, eventDates } = await lookups(d);
+  return toPerson(updated, companies, events, eventDates);
 }
 
 /** today + n days, as YYYY-MM-DD. */
@@ -220,9 +241,9 @@ const filled = (p: PersonItem) => [p.email, p.phone, p.linkedin, p.telegram, p.r
 
 /** Pairs of people who look like the same person, strongest first. Never merges anything by itself. */
 export async function findDuplicates(d: PeopleDeps, max = 40): Promise<DupePair[]> {
-  const { companies, events } = await lookups(d);
+  const { companies, events, eventDates } = await lookups(d);
   const rows = await d.notion.queryAll(d.peopleDb, 1000);
-  const people = rows.map((r) => toPerson(r, companies, events)).filter((p) => p.name);
+  const people = rows.map((r) => toPerson(r, companies, events, eventDates)).filter((p) => p.name);
   const pairs = new Map<string, { i: number; j: number; reasons: Set<string>; strong: boolean }>();
   const add = (i: number, j: number, reason: string, strong: boolean) => {
     if (i === j) return;
@@ -326,8 +347,8 @@ export async function mergePeople(d: PeopleDeps, keepId: string, removeId: strin
 
   const updated = await d.notion.updatePage(keepId, props);
   await d.notion.archivePage(removeId); // last, so a failure above loses nothing
-  const { companies, events } = await lookups(d);
-  return toPerson(updated, companies, events);
+  const { companies, events, eventDates } = await lookups(d);
+  return toPerson(updated, companies, events, eventDates);
 }
 
 // ---- browsing the whole People database ---------------------------------------------------------
@@ -346,14 +367,14 @@ async function lookupsCached(d: PeopleDeps) {
  * so the app can keep its copy up to date cheaply and only read everything once.
  */
 export async function listPeople(d: PeopleDeps, opts: { cursor?: string; since?: string }): Promise<{ people: PersonItem[]; next_cursor: string | null }> {
-  const { companies, events } = await lookupsCached(d);
+  const { companies, events, eventDates } = await lookupsCached(d);
   const res = await d.notion.queryPage(d.peopleDb, {
     page_size: 100,
     sorts: [{ timestamp: 'last_edited_time', direction: 'descending' }],
     ...(opts.since ? { filter: { timestamp: 'last_edited_time', last_edited_time: { after: opts.since } } } : {}),
     ...(opts.cursor ? { start_cursor: opts.cursor } : {}),
   });
-  return { people: res.results.map((r) => toPerson(r, companies, events)), next_cursor: res.has_more ? res.next_cursor : null };
+  return { people: res.results.map((r) => toPerson(r, companies, events, eventDates)), next_cursor: res.has_more ? res.next_cursor : null };
 }
 
 export interface HistoryItem {

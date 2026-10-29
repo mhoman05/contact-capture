@@ -141,6 +141,11 @@ a{color:var(--accent)}
       <button id="save" class="primary">Save</button>
     </div>
     <p class="muted" id="setupMsg" role="status"></p>
+    <h2 style="margin-top:20px">Backup</h2>
+    <p class="muted" style="margin:0 0 8px">One file with everything: spreadsheets of people, companies, tasks, meetings and interactions, all contacts as a contact file, and a full copy. Your data lives in Notion; this is your own copy.</p>
+    <button id="bkBtn" type="button">⬇ Export everything</button>
+    <p class="muted" id="bkInfo" style="margin:8px 0 0"></p>
+    <p class="muted" id="bkMsg" role="status" style="margin:4px 0 0"></p>
   </section>
 
   <div id="addView" style="display:contents">
@@ -278,7 +283,7 @@ a{color:var(--accent)}
       </div>
       <input type="text" id="compFilter" placeholder="Search companies…" autocomplete="off">
       <div class="row" style="margin-top:8px">
-        <select id="compSort" aria-label="Sort"><option value="az">A–Z</option><option value="new">Newest first</option></select>
+        <select id="compSort" aria-label="Sort"><option value="az">A–Z</option><option value="new">Newest first</option><option value="quiet">Longest since contact</option></select>
         <button id="compNew" type="button">＋ New company</button>
       </div>
       <p class="muted" id="compCount" style="margin:8px 0 0"></p>
@@ -288,15 +293,18 @@ a{color:var(--accent)}
       <p class="muted" id="compStatus" role="status" style="margin:10px 0 0"></p>
     </section>
     <section class="card" id="peopleBox">
+      <div id="recOutbox" class="warn hidden" style="margin:0 0 10px"><span id="recOutboxText"></span> <button class="chip" id="recOutboxSend" type="button">Send now</button></div>
+      <div id="recNote" class="warn hidden" style="margin:0 0 10px"><span id="recNoteText"></span> <button class="chip" id="recNoteOk" type="button">OK</button></div>
       <div class="chips chipsrow" id="recChips" style="margin:0 0 10px">
         <button class="chip" type="button" data-f="all" aria-pressed="true">All</button>
         <button class="chip" type="button" data-f="review">To review</button>
         <button class="chip" type="button" data-f="due">Follow up</button>
+        <button class="chip" type="button" data-f="quiet">Quiet 90+ days</button>
         <button class="chip" type="button" data-f="dupes">Duplicates</button>
       </div>
       <input type="text" id="recFilter" placeholder="Search name, company, note, event…" autocomplete="off">
       <div class="row" id="recTools" style="margin-top:8px">
-        <select id="recSort" aria-label="Sort"><option value="az">A–Z</option><option value="new">Newest first</option></select>
+        <select id="recSort" aria-label="Sort"><option value="az">A–Z</option><option value="new">Newest first</option><option value="quiet">Longest since contact</option></select>
         <select id="recTier" aria-label="Tier"><option value="">Any tier</option><option value="A - Key">Tier A</option><option value="B - Important">Tier B</option><option value="C - Network">Tier C</option><option value="none">No tier</option></select>
       </div>
       <p class="muted" id="recCount" style="margin:8px 0 0"></p>
@@ -840,9 +848,11 @@ a{color:var(--accent)}
 <script src="card.js"></script>
 <script src="events.js"></script>
 <script src="tasks.js"></script>
+<script src="outbox.js"></script>
 <script src="recent.js"></script>
 <script src="companies.js"></script>
 <script src="vcard.js"></script>
 <script src="queue.js"></script>
+<script src="export.js"></script>
 </body>
 </html>

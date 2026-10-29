@@ -68,15 +68,16 @@ async function companyNames(d: TaskDeps, fresh = false): Promise<Map<string, str
  * One page (up to 100) of tasks, most recently edited first. Without `since`: every task that is not Done plus the
  * ones edited in the last 45 days (so recently completed tasks are there to undo). With `since`: only what changed.
  */
-export async function listTasks(d: TaskDeps, opts: { cursor?: string; since?: string }): Promise<{ tasks: TaskItem[]; next_cursor: string | null }> {
+export async function listTasks(d: TaskDeps, opts: { cursor?: string; since?: string; all?: boolean }): Promise<{ tasks: TaskItem[]; next_cursor: string | null }> {
   const cutoff = new Date(Date.now() - 45 * 864e5).toISOString();
   const filter = opts.since
     ? { timestamp: 'last_edited_time', last_edited_time: { after: opts.since } }
     : { or: [{ property: 'Status', status: { does_not_equal: 'Done' } }, { timestamp: 'last_edited_time', last_edited_time: { after: cutoff } }] };
+  // all: every task ever, oldest first (a stable order to page through, for the backup)
   const res = await d.notion.queryPage(d.tasksDb, {
     page_size: 100,
-    sorts: [{ timestamp: 'last_edited_time', direction: 'descending' }],
-    filter,
+    sorts: [opts.all ? { timestamp: 'created_time', direction: 'ascending' } : { timestamp: 'last_edited_time', direction: 'descending' }],
+    ...(opts.all ? {} : { filter }),
     ...(opts.cursor ? { start_cursor: opts.cursor } : {}),
   });
   const companies = await companyNames(d);

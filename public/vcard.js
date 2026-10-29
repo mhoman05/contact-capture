@@ -47,7 +47,14 @@
       const j = await res.json().catch(() => ({}));
       if (res.ok) return j.status === 'exists' ? 'Already in your Google Contacts.' : 'Saved to Google Contacts. It shows up in your phone\'s Contacts within a minute.';
       failure = res.status === 503 ? '' : (j.error || 'Google Contacts did not answer.');
-    } catch { failure = 'No connection, so a contact file is offered instead.'; }
+    } catch {
+      // No signal: keep the request on the phone and send it when the connection is back (a contact file is the fallback without the outbox).
+      if (window.CCOutbox) {
+        let tok = ''; try { tok = localStorage.getItem('cc.tok') || ''; } catch { /* no storage */ }
+        if (tok) { CCOutbox.add({ kind: 'gcontact', path: '/contacts/google', body: { name: p.name, company: p.company, role: p.role, phone: p.phone, email: p.email, linkedin: p.linkedin, telegram: p.telegram, location: p.location, note: p.note }, label: 'Save ' + p.name + ' to Google Contacts' }); return 'No signal: saved on this phone. It goes to your Google Contacts by itself when you are online.'; }
+      }
+      failure = 'No connection, so a contact file is offered instead.';
+    }
     const fallback = await share([p]);
     return [failure, fallback].filter(Boolean).join(' ');
   }
