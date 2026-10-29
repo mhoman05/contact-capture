@@ -184,6 +184,10 @@ a{color:var(--accent)}
       <button id="scanBtn" type="button">🔳 Scan a QR code</button>
       <button id="manualBtn" type="button">✍ Type it in</button>
     </div>
+    <div id="scans" class="hidden" style="margin-top:12px">
+      <div class="muted">Saved scans <span id="scansHint">(tap one to fill the form again)</span></div>
+      <div id="scanList"></div>
+    </div>
 
     <div id="manual" class="hidden">
       <p class="muted" id="scanMsg" role="status" style="margin:12px 0 0"></p>
@@ -297,7 +301,6 @@ a{color:var(--accent)}
       </div>
       <p class="muted" id="recCount" style="margin:8px 0 0"></p>
       <div id="recList" style="margin-top:6px"></div>
-      <button id="recMore" type="button" class="hidden" style="width:100%;margin-top:6px"></button>
       <div id="dupList" class="hidden" style="margin-top:10px"></div>
       <div class="row" style="margin-top:10px"><button id="recReload" type="button">Reload everything from Notion</button></div>
       <p class="muted" id="recStatus" role="status" style="margin:10px 0 0"></p>
@@ -699,35 +702,73 @@ a{color:var(--accent)}
 
   // ---- typed / scanned contact ----------------------------------------------------
   const MF = ['name', 'company', 'phone', 'email', 'role', 'linkedin', 'telegram', 'website'];
-  let fromQR = false;
+  let fromQR = false, scanId = '';
   const manualContact = () => {
     const c = {}; for (const k of MF) c[k] = $('m-' + k).value.trim();
     return c.name ? { ...c, source: fromQR ? 'qr' : 'typed' } : null;
   };
   function showManual(open) { $('manual').classList.toggle('hidden', !open); if (open) $('m-name').focus(); refresh(); }
-  function clearManual() { for (const k of MF) $('m-' + k).value = ''; fromQR = false; $('scanMsg').textContent = ''; $('manual').classList.add('hidden'); $('m-more').open = false; }
+  function clearManual() { for (const k of MF) $('m-' + k).value = ''; fromQR = false; scanId = ''; $('scanMsg').textContent = ''; $('manual').classList.add('hidden'); $('m-more').open = false; }
   $('manualBtn').onclick = () => showManual($('manual').classList.contains('hidden'));
   $('manualClear').onclick = () => { clearManual(); refresh(); };
   // From a company's screen: open the typed form with the company filled in.
   window.CCAddPerson = (fields) => { if (window.CCTab) CCTab('add'); showManual(true); for (const [k, v] of Object.entries(fields || {})) if ($('m-' + k)) $('m-' + k).value = v; refresh(); setTimeout(() => $('m-name').focus(), 50); };
   for (const k of MF) $('m-' + k).addEventListener('input', refresh);
 
-  $('scanBtn').onclick = async () => {
-    const text = await CCScan.scanCamera({ root: $('scanner'), video: $('scanVideo'), cancel: $('scanCancel'), fromFile: $('scanFile'), msg: $('scanLive') });
-    if (text == null) return;
-    const r = CCScan.parse(text);
+  // Every scanned code is saved on the phone (see scan.js), so one that could not be filed at that moment can be used the next day.
+  const whenText = (at) => { const d = Math.floor((Date.now() - at) / 864e5); return d <= 0 ? 'today ' + new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d === 1 ? 'yesterday' : new Date(at).toLocaleDateString(); };
+  function renderScans() {
+    const list = CCScan.saved.all().slice(0, 10);
+    $('scans').classList.toggle('hidden', !list.length);
+    $('scanList').replaceChildren(...list.map((sc) => {
+      const row = el('div', 'row'); row.style.alignItems = 'center'; row.style.marginTop = '6px';
+      const b = el('button', ''); b.type = 'button'; b.style.cssText = 'flex:1;text-align:left;' + (sc.status === 'added' ? 'opacity:.65' : '');
+      b.append(el('div', '', sc.label), el('div', 'muted', whenText(sc.at) + ' · ' + (sc.status === 'added' ? 'added ✓' : 'not added yet')));
+      b.onclick = () => useScan(sc.raw, sc.id);
+      const x = el('button', 'chip', '✕'); x.type = 'button'; x.setAttribute('aria-label', 'Remove this saved scan'); x.onclick = () => { CCScan.saved.remove(sc.id); renderScans(); };
+      row.append(b, x); return row;
+    }));
+  }
+  const fillFrom = (r, onlyEmpty) => {
+    for (const k of MF) if (r.fields[k] && (!onlyEmpty || !$('m-' + k).value.trim())) $('m-' + k).value = r.fields[k];
+    if (r.note && !$('note').value.trim()) $('note').value = r.note;
+    if (r.fields.role || r.fields.linkedin || r.fields.telegram || r.fields.website) $('m-more').open = true;
+  };
+  async function useScan(text, id) {
+    let r = CCScan.parse(text);
+    if (!id) id = CCScan.saved.add(text, CCScan.describe(r, text));
+    scanId = id; renderScans();
+    for (const k of MF) $('m-' + k).value = ''; // a saved scan replaces what is in the form
     $('manual').classList.remove('hidden');
     if (!r || r.reject) {
-      $('scanMsg').textContent = r ? r.hint : 'That QR code does not contain contact details' + (text.length < 80 ? ': ' + text : '.');
+      $('scanMsg').textContent = r ? r.hint : 'That QR code does not contain contact details' + (text.length < 80 ? ': ' + text : '.') + ' It is saved below.';
       refresh(); return;
     }
-    for (const k of MF) if (r.fields[k]) $('m-' + k).value = r.fields[k];
+    fillFrom(r, false);
     fromQR = true;
-    if (r.fields.role || r.fields.linkedin || r.fields.telegram || r.fields.website) $('m-more').open = true;
     $('scanMsg').textContent = 'Scanned ' + r.label + '. ' + r.hint;
     refresh();
     (r.fields.name ? $('m-company') : $('m-name')).focus();
+    if (r.lookup && cfg().tok && navigator.onLine !== false) {
+      // LinkedIn and WhatsApp codes are short links: the service follows them to find the profile address and, if the site shows it, the name.
+      $('scanMsg').textContent = 'Scanned ' + r.label + '. Looking up the name…';
+      try {
+        const res = await fetch(cfg().url + '/scan/lookup', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg().tok }, body: JSON.stringify({ url: text }), signal: AbortSignal.timeout(10000) });
+        if (res.ok && scanId === id) {
+          const better = CCScan.applyLookup(r, await res.json());
+          if (better.fields.linkedin && better.fields.linkedin !== r.fields.linkedin) $('m-linkedin').value = better.fields.linkedin;
+          fillFrom(better, true); r = better;
+        }
+      } catch { /* offline or the site said no: keep what the code itself gave */ }
+      if (scanId === id) { $('scanMsg').textContent = 'Scanned ' + r.label + '. ' + r.hint; refresh(); }
+    }
+  }
+  $('scanBtn').onclick = async () => {
+    const text = await CCScan.scanCamera({ root: $('scanner'), video: $('scanVideo'), cancel: $('scanCancel'), fromFile: $('scanFile'), msg: $('scanLive') });
+    if (text == null) return;
+    await useScan(text, '');
   };
+  renderScans();
 
   // What was typed or chosen is cleared once it has been sent, or safely stored on the phone to be sent later.
   function clearInputs() {
@@ -770,7 +811,8 @@ a{color:var(--accent)}
         let saved = false;
         try { if (window.CCQueue) { await CCQueue.add(body, captureLabel(body)); saved = true; } } catch { /* storage unavailable */ }
         if (saved) {
-          clearInputs();
+          if (scanId) CCScan.saved.mark(scanId, 'added');
+          clearInputs(); renderScans();
           const n = await CCQueue.count();
           showResult([el('div', 'warn', problem + ' Saved on this phone (' + n + ' waiting). It sends by itself when you are back online with the app open.')]);
         } else showResult([el('div', 'err', problem + ' Your photos are still here, try again.')]);
@@ -779,7 +821,7 @@ a{color:var(--accent)}
         showResult([el('div', 'err', msg)]);
       } else {
         renderOutcome(data);
-        if ((data.results || []).length) { clearInputs(); if (window.CCRecent) CCRecent.invalidate(); }
+        if ((data.results || []).length) { if (scanId) CCScan.saved.mark(scanId, 'added'); clearInputs(); renderScans(); if (window.CCRecent) CCRecent.invalidate(); }
       }
     } catch (e) {
       const msg = e instanceof DOMException || /image|bitmap/i.test(String(e)) ? 'This image could not be read. Try another photo.' : 'Something went wrong: ' + e.message;

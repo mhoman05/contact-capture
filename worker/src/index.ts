@@ -6,6 +6,7 @@ import { checkNotion } from './status';
 import { companyHistory, createCompany, listCompanies, parseCompanyFields, parseCompanyUpdate, updateCompany } from './companies';
 import { createTask, deleteTask, listTasks, parseTaskCreate, parseTaskUpdate, updateTask } from './tasks';
 import { vcardResponse } from './vcard';
+import { lookup, parseLookupRequest } from './lookup';
 import { GoogleError, parseGoogleContact, saveToGoogle } from './google';
 import { createEvent, getEvent, listEvents, parseNewEvent } from './events';
 import { readMe, updateMeValue } from './me';
@@ -128,6 +129,25 @@ async function handleMe(req: Request, env: Env, path: string): Promise<Response>
     if (err instanceof NotionError) return json({ error: err.message }, err.status);
     console.error(err);
     return json({ error: 'Unexpected error.' }, 500);
+  }
+}
+
+/** Follows a scanned LinkedIn or WhatsApp short link for the app (see lookup.ts). */
+async function handleLookup(req: Request): Promise<Response> {
+  const raw = await req.text();
+  if (raw.length > 2_000) return json({ error: 'Request too large.' }, 413);
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return json({ error: 'Body is not valid JSON.' }, 400);
+  }
+  const target = parseLookupRequest(body);
+  if (typeof target === 'string') return json({ error: target }, 400);
+  try {
+    return json(await lookup(target), 200);
+  } catch {
+    return json({ error: 'Could not look that up.' }, 502);
   }
 }
 
@@ -358,7 +378,7 @@ export default {
     // A contact card shared from "My QR": open to save the contact. Public, see vcard.ts.
     if (url.pathname === '/v') return req.method === 'GET' ? vcardResponse(url.searchParams.get('c'), url.searchParams.get('f') === '1') : json({ error: 'Use GET.' }, 405);
     // Everything else is a static file of the app.
-    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST', '/people/list': 'GET', '/people/history': 'GET', '/status': 'GET', '/tasks/list': 'GET', '/tasks/create': 'POST', '/tasks/update': 'POST', '/tasks/delete': 'POST', '/companies/list': 'GET', '/companies/history': 'GET', '/companies/create': 'POST', '/companies/update': 'POST', '/interactions/create': 'POST', '/contacts/google': 'POST' };
+    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST', '/people/list': 'GET', '/people/history': 'GET', '/status': 'GET', '/tasks/list': 'GET', '/tasks/create': 'POST', '/tasks/update': 'POST', '/tasks/delete': 'POST', '/companies/list': 'GET', '/companies/history': 'GET', '/companies/create': 'POST', '/companies/update': 'POST', '/interactions/create': 'POST', '/contacts/google': 'POST', '/scan/lookup': 'POST' };
     const method = API[url.pathname];
     if (!method) {
       return env.ASSETS ? env.ASSETS.fetch(req) : json({ error: 'Not found.' }, 404);
@@ -376,6 +396,7 @@ export default {
     if (url.pathname === '/status') return json(await checkNotion(new NotionClient(env.NOTION_TOKEN), env), 200);
     if (url.pathname === '/interactions/create') return handleLog(req, env);
     if (url.pathname === '/contacts/google') return handleGoogleContact(req, env);
+    if (url.pathname === '/scan/lookup') return handleLookup(req);
     if (url.pathname.startsWith('/companies/')) return handleCompanies(req, env, url);
     if (url.pathname.startsWith('/tasks/')) return handleTasks(req, env, url);
     if (url.pathname.startsWith('/people/')) return handlePeople(req, env, url);

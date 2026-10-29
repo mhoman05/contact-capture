@@ -22,7 +22,7 @@
 
   let state = { items: {}, syncedAt: '', fullAt: '' };
   let stale = true, syncing = false, loadedAt = 0, current = null, editing = false, pairs = null;
-  const ui = { filter: 'all', sort: store.get('cc.p.sort', 'az'), tier: '', limit: 100 };
+  const ui = { filter: 'all', sort: store.get('cc.p.sort', 'az'), tier: '' };
   const all = () => Object.values(state.items);
   const dismissed = (() => { try { return new Set(JSON.parse(store.get('cc.dupe.no', '[]'))); } catch { return new Set(); } })();
   const pairKey = (p) => [p.a.id, p.b.id].sort().join('|');
@@ -94,7 +94,7 @@
     const dupMode = ui.filter === 'dupes';
     $('recChips').querySelector('[data-f=dupes]').textContent = 'Duplicates' + (pairs ? ' (' + pairs.filter((p) => !dismissed.has(pairKey(p))).length + ')' : '');
     document.querySelectorAll('#recChips button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.f === ui.filter)));
-    for (const id of ['recList', 'recMore', 'recFilter', 'recTools', 'recCount']) $(id).classList.toggle('hidden', dupMode);
+    for (const id of ['recList', 'recFilter', 'recTools', 'recCount']) $(id).classList.toggle('hidden', dupMode);
     $('dupList').classList.toggle('hidden', !dupMode);
     $('recSort').value = ui.sort; $('recTier').value = ui.tier;
     $('recChips').querySelector('[data-f=due]').textContent = 'Follow up' + (all().filter(due).length ? ' (' + all().filter(due).length + ')' : '');
@@ -103,11 +103,10 @@
     if (dupMode) { renderDupes(); return; }
 
     const list = visible();
-    const shown = list.slice(0, ui.limit);
     $('recCount').textContent = list.length === all().length ? all().length + ' people' : list.length + ' of ' + all().length + ' people';
     const box = $('recList'); box.replaceChildren();
     let letter = '';
-    for (const p of shown) {
+    for (const p of list) {
       if (ui.sort === 'az' && ui.filter !== 'due') {
         const l = fold(p.name).charAt(0).toUpperCase();
         const head = /[A-Z]/.test(l) ? l : '#';
@@ -129,8 +128,6 @@
       box.append(b);
     }
     if (!list.length) box.append(el('div', 'muted', all().length ? 'Nobody matches.' : syncing ? 'Loading…' : 'Nobody yet. People you add appear here.'));
-    $('recMore').classList.toggle('hidden', list.length <= ui.limit);
-    $('recMore').textContent = 'Show ' + Math.min(100, list.length - ui.limit) + ' more';
   }
 
   // ---- one person: details first, editing on request -----------------------------------
@@ -237,7 +234,16 @@
         const row = el('div', 'kv');
         row.append(el('span', 'muted', h.date || '—'));
         const t = el('span'); t.append(el('b', '', h.title), el('span', 'muted', ' · ' + h.type));
-        if (h.summary) t.append(el('div', 'muted', h.summary.length > 160 ? h.summary.slice(0, 157) + '…' : h.summary));
+        // Emails logged from Gmail carry a link to the thread; show it as a button and keep the text short.
+        const mail = (h.summary || '').match(/https:\/\/mail\.google\.com\/\S+/);
+        const text = (h.summary || '').replace(/\s*Auto-logged from Gmail:.*$/s, '').trim();
+        if (text) t.append(el('div', 'muted', text.length > 160 ? text.slice(0, 157) + '…' : text));
+        const links = el('div', '');
+        links.style.marginTop = '4px';
+        const open = (label, href) => { const a = el('a', 'btn chip', label); a.href = href; a.target = '_blank'; a.rel = 'noopener'; a.style.cssText = 'display:inline-block;text-decoration:none;margin:0 6px 4px 0;padding:6px 12px'; links.append(a); };
+        if (h.url) open(h.kind === 'meeting' ? '📝 Open meeting notes' : '↗ Open in Notion', h.url);
+        if (mail) open('✉ Open email', mail[0]);
+        if (links.childNodes.length) t.append(links);
         row.append(t); box.append(row);
       }
     };
@@ -347,11 +353,10 @@
   }
 
   // ---- controls ------------------------------------------------------------------------
-  document.querySelectorAll('#recChips button').forEach((b) => { b.onclick = () => { ui.filter = b.dataset.f; ui.limit = 100; if (ui.filter === 'dupes') pairs = null; render(); }; });
-  $('recFilter').oninput = () => { ui.limit = 100; render(); };
-  $('recSort').onchange = () => { ui.sort = $('recSort').value; store.set('cc.p.sort', ui.sort); ui.limit = 100; render(); };
-  $('recTier').onchange = () => { ui.tier = $('recTier').value; ui.limit = 100; render(); };
-  $('recMore').onclick = () => { ui.limit += 100; render(); };
+  document.querySelectorAll('#recChips button').forEach((b) => { b.onclick = () => { ui.filter = b.dataset.f; if (ui.filter === 'dupes') pairs = null; render(); }; });
+  $('recFilter').oninput = () => { render(); };
+  $('recSort').onchange = () => { ui.sort = $('recSort').value; store.set('cc.p.sort', ui.sort); render(); };
+  $('recTier').onchange = () => { ui.tier = $('recTier').value; render(); };
   $('recReload').onclick = () => sync(true);
 
   window.CCRecent = {

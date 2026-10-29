@@ -69,6 +69,10 @@
       if (/^\/(\+|joinchat)/i.test(u.pathname)) return { label: 'a Telegram group invite', fields: blank, hint: 'That is a group invite, not a person. Nothing to add.' , reject: true };
       return { label: 'a Telegram profile', fields: { ...blank, telegram: u.href }, hint: 'Telegram only shares the username. Type their name.' };
     }
+    if ((host === 'wa.me' || host === 'api.whatsapp.com') && /^\/qr\//i.test(u.pathname)) {
+      // A WhatsApp profile code: an opaque link, it holds neither the number nor the name.
+      return { label: 'a WhatsApp profile', fields: blank, note: 'WhatsApp: ' + u.href, lookup: true, hint: 'A WhatsApp profile code holds neither a name nor a phone number. The link is saved in the note; type the name and number.' };
+    }
     if (host === 'wa.me' || host === 'api.whatsapp.com') {
       const digits = (host === 'wa.me' ? u.pathname.slice(1) : u.searchParams.get('phone') || '').replace(/\D/g, '');
       if (digits) return { label: 'a WhatsApp number', fields: { ...blank, phone: '+' + digits }, hint: 'Type the name.' };
@@ -77,10 +81,74 @@
       const slug = u.pathname.match(/^\/(?:in|pub)\/([^/?#]+)/i)?.[1];
       const name = slug ? nameFromSlug(slug) : '';
       const link = slug ? 'https://www.linkedin.com/in/' + slug : u.origin + u.pathname;
-      return { label: 'a LinkedIn profile', fields: { ...blank, linkedin: link, name }, hint: name ? 'The name comes from the LinkedIn address. Check it.' : 'LinkedIn does not share the name in the code. Type it; the profile link is saved so you can enrich it later.' };
+      return { label: 'a LinkedIn profile', lookup: host === 'lnkd.in' || !name, fields: { ...blank, linkedin: link, name }, hint: name ? 'The name comes from the LinkedIn address. Check it.' : 'LinkedIn does not share the name in the code. Type it; the profile link is saved so you can enrich it later.' };
     }
     return { label: 'a website', fields: { ...blank, website: u.href }, hint: 'Type the name.' };
   }
+
+
+  /** "Jane Doe - Head of Sales - Acme | LinkedIn" -> "Jane Doe"; '' for login pages and anything that is not a name. */
+  function nameFromTitle(title) {
+    const t = String(title || '').replace(/\s*[|\-–—·]\s*LinkedIn\s*$/i, '').trim();
+    if (!t || /linkedin/i.test(t) || /^(sign up|join|log ?in|welcome|whatsapp|security verification|page not found|authwall)\b/i.test(t)) return '';
+    const name = t.split(/\s+[-–—|]\s+/)[0].replace(/\s*\(.*?\)\s*$/, '').trim();
+    return name.length >= 2 && name.length <= 80 && !/[0-9@/:]/.test(name) ? name : '';
+  }
+  function nameFromWhatsApp(title) {
+    const t = String(title || '').trim();
+    const m = t.match(/(?:chat|message|messages?)(?: on whatsapp)?\s+(?:with|to)\s+(.+)$/i) || t.match(/^(.+?)\s+on whatsapp$/i);
+    const name = m ? m[1].trim() : '';
+    return name && name.length <= 80 && !/^whatsapp\b/i.test(name) && !/[0-9@/:]/.test(name) ? name : '';
+  }
+
+  /** Improves a parsed code with what the service found by following its short link: { url, title }. */
+  function applyLookup(r, d) {
+    if (!r || !d) return r;
+    const out = { ...r, fields: { ...r.fields } };
+    if (r.label === 'a LinkedIn profile') {
+      let slug = '';
+      try { const f = new URL(d.url); if (/(^|\.)linkedin\.com$/i.test(f.hostname)) slug = f.pathname.match(/^\/(?:in|pub)\/([^/?#]+)/i)?.[1] || ''; } catch { /* keep what the code said */ }
+      if (slug) { out.fields.linkedin = 'https://www.linkedin.com/in/' + slug; if (!out.fields.name) { try { out.fields.name = nameFromSlug(slug); } catch { /* malformed */ } } }
+      if (!out.fields.name) out.fields.name = nameFromTitle(d.title);
+      out.hint = out.fields.name ? 'The name was read from LinkedIn. Check it.' : 'LinkedIn did not show the name. Type it; the profile link is saved so you can enrich it later.';
+    } else if (r.label === 'a WhatsApp profile') {
+      const n = nameFromWhatsApp(d.title);
+      if (n) { out.fields.name = n; out.hint = 'The name was read from WhatsApp. The code has no phone number: type it, or open the link in the note.'; }
+    }
+    return out;
+  }
+
+  /** A short line for the list of saved scans. */
+  function describe(r, raw) {
+    if (!r) return 'Unrecognised code: ' + String(raw).slice(0, 40);
+    const f = r.fields || {};
+    const detail = f.name || (f.linkedin && f.linkedin.replace(/^https?:\/\/(www\.)?linkedin\.com\/(in|pub)\//i, '').replace(/\/$/, '')) || (f.telegram && '@' + String(f.telegram).replace(/^.*(?:t\.me|telegram\.me)\//i, '').replace(/^.*domain=/i, '')) || f.phone || f.email || f.website || '';
+    return cap(r.label.replace(/^an? /, '')) + (detail ? ': ' + String(detail).slice(0, 50) : '');
+  }
+
+  // Every scanned code is kept on the phone, so one that could not be filed (no signal, wrong moment) can be used again later.
+  const KEY = 'cc.scans', MAX_SCANS = 40, DAY = 864e5;
+  const saved = {
+    all() {
+      let list = [];
+      try { list = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch { /* none yet */ }
+      const now = Date.now();
+      return (Array.isArray(list) ? list : []).filter((e) => e && e.raw && now - e.at < (e.status === 'added' ? 7 : 90) * DAY).sort((a, b) => b.at - a.at).slice(0, MAX_SCANS);
+    },
+    _write(list) { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* storage full or off: the form still works */ } },
+    /** Remembers a code (scanning the same one again refreshes it); returns its id. */
+    add(raw, label) {
+      const list = this.all();
+      const hit = list.find((e) => e.raw === raw);
+      if (hit) { hit.at = Date.now(); hit.status = 'new'; hit.label = label || hit.label; this._write(list); return hit.id; }
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      list.unshift({ id, raw, label, at: Date.now(), status: 'new' });
+      this._write(list.slice(0, MAX_SCANS));
+      return id;
+    },
+    mark(id, status) { const list = this.all(); const e = list.find((x) => x.id === id); if (e) { e.status = status; this._write(list); } },
+    remove(id) { this._write(this.all().filter((e) => e.id !== id)); },
+  };
 
   async function decodeImage(file) {
     const bmp = await createImageBitmap(file);
@@ -133,5 +201,5 @@
     });
   }
 
-  window.CCScan = { parse, decodeImage, scanCamera, nameFromSlug };
+  window.CCScan = { parse, applyLookup, describe, saved, decodeImage, scanCamera, nameFromSlug, nameFromTitle, nameFromWhatsApp };
 })();
