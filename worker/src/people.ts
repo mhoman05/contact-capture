@@ -24,6 +24,27 @@ export interface PersonItem {
   created: string; // ISO time the person was added
   edited: string; // ISO time of the last edit in Notion
   last_contact: string; // YYYY-MM-DD of the latest meeting, interaction or event with them (not in the future), or ''
+  event_dates: string[]; // the date of each entry of `events` ('' when unknown), same order
+  // The rest of the Notion fields, for the "All Notion details" section (read-only in the app)
+  summary: string; // "History summary" (or the Notion AI "Relationship summary"), '' when neither exists
+  target_status: string;
+  target_priority: string;
+  why: string;
+  birthday: string;
+  last_enriched: string;
+  previous_companies: string[];
+  can_introduce_companies: string[];
+  potential_intro_ids: string[];
+  introduced_by_ids: string[];
+  introduced_ids: string[];
+  can_introduce_ids: string[];
+  follow_up_status: string; // Notion's own wording: Overdue, Due this week, On track …
+  next_contact_due: string;
+  cadence: string;
+  open_tasks: string;
+  meetings_count: string;
+  needs_enrichment: string;
+  review: string;
 }
 
 export interface PeopleDeps {
@@ -54,6 +75,18 @@ export function lastContact(page: NotionPage, eventDates: Map<string, string>, n
   return found.filter((d) => d && d <= limit).sort().at(-1) ?? '';
 }
 
+/** Text of a formula or rollup result, whatever its type ('' when it has none). */
+function computed(prop: any): string {
+  const v = prop?.formula ?? prop?.rollup;
+  if (!v) return '';
+  if (v.type === 'string') return String(v.string ?? '');
+  if (v.type === 'number') return v.number == null ? '' : String(v.number);
+  if (v.type === 'boolean') return v.boolean ? 'Yes' : 'No';
+  if (v.type === 'date') return (v.date?.start ?? '').slice(0, 10);
+  return '';
+}
+const ids = (prop: any): string[] => (prop?.relation ?? []).map((r: any) => r.id as string);
+
 export function toPerson(page: NotionPage, companies: Map<string, string>, events: Map<string, string>, eventDates: Map<string, string> = new Map()): PersonItem {
   const p = page.properties;
   return {
@@ -77,6 +110,27 @@ export function toPerson(page: NotionPage, companies: Map<string, string>, event
     created: page.created_time ?? '',
     edited: page.last_edited_time ?? page.created_time ?? '',
     last_contact: lastContact(page, eventDates),
+    event_dates: (p.Events?.relation ?? []).filter((r: any) => events.get(r.id)).map((r: any) => eventDates.get(r.id) ?? ''),
+    // "History summary" is written by Claude from the logged history; the Notion AI "Relationship summary" is the fallback
+    summary: truncate((plain(p['History summary']) || plain(p['Relationship summary']) || computed(p['Relationship summary'])).trim(), 3000),
+    target_status: p['Target Status']?.select?.name ?? '',
+    target_priority: p['Target Priority']?.select?.name ?? '',
+    why: truncate(plain(p['Why They Matter']).trim(), 600),
+    birthday: (p.Birthday?.date?.start ?? '').slice(0, 10),
+    last_enriched: (p['Last Enriched']?.date?.start ?? '').slice(0, 10),
+    previous_companies: (p['Previous Companies']?.relation ?? []).map((r: any) => companies.get(r.id)).filter(Boolean) as string[],
+    can_introduce_companies: (p['Can Introduce (Companies)']?.relation ?? []).map((r: any) => companies.get(r.id)).filter(Boolean) as string[],
+    potential_intro_ids: ids(p['Potential Intro']),
+    introduced_by_ids: ids(p['Introduced By']),
+    introduced_ids: ids(p.Introduced),
+    can_introduce_ids: ids(p['Can Introduce']),
+    follow_up_status: computed(p['Follow-up Status']),
+    next_contact_due: computed(p['Next Contact Due']) || dateValue(p['Next Contact Due']),
+    cadence: computed(p['Cadence (days)']),
+    open_tasks: computed(p['Open Task Count']),
+    meetings_count: computed(p['# Meetings']),
+    needs_enrichment: computed(p['Needs Enrichment']),
+    review: computed(p.Review),
   };
 }
 

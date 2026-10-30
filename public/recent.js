@@ -20,9 +20,10 @@
   const kvGet = async () => { try { const d = await idb(); return await new Promise((res) => { const q = d.transaction('kv').objectStore('kv').get('state'); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); } catch { return null; } };
   const kvSet = async (v) => { try { const d = await idb(); await new Promise((res) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, 'state'); t.oncomplete = res; t.onerror = res; }); } catch { /* storage unavailable: the list is then re-read each time */ } };
 
-  let state = { items: {}, syncedAt: '', fullAt: '' };
+  const FORMAT = 3; // bump when the people records gain a field: the phone's old copy is then read in full once
+  let state = { items: {}, syncedAt: '', fullAt: '', v: FORMAT };
   let stale = true, syncing = false, loadedAt = 0, current = null, editing = false, pairs = null;
-  const ui = { filter: 'all', sort: store.get('cc.p.sort', 'az'), tier: '' };
+  const ui = { filter: 'all', sort: store.get('cc.p.sort', 'az'), tier: '', event: '' };
   const all = () => Object.values(state.items);
   const dismissed = (() => { try { return new Set(JSON.parse(store.get('cc.dupe.no', '[]'))); } catch { return new Set(); } })();
   const pairKey = (p) => [p.a.id, p.b.id].sort().join('|');
@@ -61,7 +62,8 @@
     if (!res.ok) { const err = new Error(data.error || 'Something went wrong (' + res.status + ').'); err.retryable = res.status === 429 || res.status >= 500; throw err; }
     return data;
   }
-  const norm = (p) => ({ ...p, events: p.events || [], contact_type: p.contact_type || [], tier: p.tier || '', notes: p.notes || '', last_contact: p.last_contact || '' });
+  const LISTS = ['events', 'event_dates', 'contact_type', 'previous_companies', 'can_introduce_companies', 'potential_intro_ids', 'introduced_by_ids', 'introduced_ids', 'can_introduce_ids'];
+  const norm = (p) => { const q = { ...p, tier: p.tier || '', notes: p.notes || '', last_contact: p.last_contact || '' }; for (const k of LISTS) q[k] = p[k] || []; return q; };
   const persist = () => kvSet(state);
 
   // ---- syncing ---------------------------------------------------------------------
@@ -73,7 +75,7 @@
     }
     syncing = true;
     const started = new Date().toISOString();
-    const doFull = full || !state.syncedAt || Date.now() - Date.parse(state.fullAt || 0) > 864e5; // everything again once a day, to notice people deleted in Notion
+    const doFull = full || !state.syncedAt || state.v !== FORMAT || Date.now() - Date.parse(state.fullAt || 0) > 864e5; // everything again once a day, to notice people deleted in Notion
     const items = doFull ? {} : { ...state.items };
     const since = doFull ? '' : new Date(Date.parse(state.syncedAt) - 120000).toISOString();
     let cursor = '';
@@ -85,7 +87,7 @@
         cursor = data.next_cursor || '';
         if (doFull) { setStatus('Loading people… ' + Object.keys(items).length); if (!state.syncedAt) { state = { ...state, items: { ...items } }; render(); } }
       } while (cursor);
-      state = { items, syncedAt: started, fullAt: doFull ? started : state.fullAt };
+      state = { items, syncedAt: started, fullAt: doFull ? started : state.fullAt, v: FORMAT };
       await persist(); stale = false; loadedAt = Date.now(); setStatus('');
     } catch (e) {
       setStatus(all().length ? 'Could not reach Notion (' + e.message + '). Showing the copy on this phone.' : e.message, !all().length);
@@ -98,6 +100,7 @@
     const q = fold($('recFilter').value.trim());
     const quietBefore = plusDays(-90);
     let list = all().filter((p) => (ui.filter === 'review' ? p.needs_review : ui.filter === 'due' ? due(p) : ui.filter === 'quiet' ? lastSeen(p) < quietBefore : true))
+      .filter((p) => !ui.event || p.events.includes(ui.event))
       .filter((p) => !ui.tier || (ui.tier === 'none' ? !p.tier : p.tier === ui.tier))
       .filter((p) => !q || fold([p.name, p.company, p.role, p.email, p.phone, p.how, p.notes, p.events.join(' '), p.location, p.tier].join(' ')).includes(q));
     if (ui.filter === 'due') list.sort((a, b) => a.next_followup.localeCompare(b.next_followup));
@@ -107,13 +110,29 @@
     return list;
   }
 
+  /** event name -> date, from what the people carry */
+  function eventDates() {
+    const m = new Map();
+    for (const p of all()) p.events.forEach((n, i) => { if (p.event_dates[i] && !m.has(n)) m.set(n, p.event_dates[i]); });
+    return m;
+  }
+  let eventSig = '';
+  function fillEventSelect() {
+    const m = eventDates();
+    const names = [...new Set(all().flatMap((p) => p.events))].sort((a, b) => (m.get(b) || '').localeCompare(m.get(a) || '') || a.localeCompare(b));
+    const sig = names.join('|');
+    if (sig !== eventSig) { eventSig = sig; $('recEvent').replaceChildren(new Option('Any event', ''), ...names.map((n) => new Option(n + (m.get(n) ? ' · ' + m.get(n) : ''), n))); }
+    if (ui.event && !names.includes(ui.event)) ui.event = '';
+    $('recEvent').value = ui.event;
+  }
+
   function render() {
     const dupMode = ui.filter === 'dupes';
     $('recChips').querySelector('[data-f=dupes]').textContent = 'Duplicates' + (pairs ? ' (' + pairs.filter((p) => !dismissed.has(pairKey(p))).length + ')' : '');
     document.querySelectorAll('#recChips button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.f === ui.filter)));
     for (const id of ['recList', 'recFilter', 'recTools', 'recCount']) $(id).classList.toggle('hidden', dupMode);
     $('dupList').classList.toggle('hidden', !dupMode);
-    $('recSort').value = ui.sort; $('recTier').value = ui.tier;
+    $('recSort').value = ui.sort; $('recTier').value = ui.tier; fillEventSelect();
     const quiet = all().filter((p) => lastSeen(p) < plusDays(-90)).length;
     $('recChips').querySelector('[data-f=quiet]').textContent = 'Quiet 90+ days' + (quiet ? ' (' + quiet + ')' : '');
     $('recChips').querySelector('[data-f=due]').textContent = 'Follow up' + (all().filter(due).length ? ' (' + all().filter(due).length + ')' : '');
@@ -124,13 +143,24 @@
     const list = visible();
     $('recCount').textContent = list.length === all().length ? all().length + ' people' : list.length + ' of ' + all().length + ' people';
     const box = $('recList'); box.replaceChildren();
-    let letter = '';
-    for (const p of list) {
-      if (ui.sort === 'az' && ui.filter !== 'due') {
-        const l = fold(p.name).charAt(0).toUpperCase();
-        const head = /[A-Z]/.test(l) ? l : '#';
-        if (head !== letter) { letter = head; box.append(el('div', 'muted letter', head)); }
+    // Rows, each with an optional heading above it: letters for A–Z, events (newest first) for "By event".
+    const rows = [];
+    if (ui.sort === 'event' && ui.filter !== 'due' && ui.filter !== 'quiet') {
+      const groups = new Map();
+      for (const p of list) for (const n of (ui.event ? [ui.event] : p.events.length ? p.events : [''])) { if (!groups.has(n)) groups.set(n, []); groups.get(n).push(p); }
+      const evDate = eventDates();
+      const order = [...groups.keys()].sort((a, b) => (!a ? 1 : !b ? -1 : (evDate.get(b) || '').localeCompare(evDate.get(a) || '') || a.localeCompare(b)));
+      for (const n of order) groups.get(n).forEach((p, i) => rows.push({ p, head: i ? '' : (n || 'No event') + (evDate.get(n) ? ' · ' + evDate.get(n) : '') + ' (' + groups.get(n).length + ')' }));
+    } else {
+      let letter = '';
+      for (const p of list) {
+        let head = '';
+        if (ui.sort === 'az' && ui.filter !== 'due') { const l = fold(p.name).charAt(0).toUpperCase(); const h = /[A-Z]/.test(l) ? l : '#'; if (h !== letter) { letter = h; head = h; } }
+        rows.push({ p, head });
       }
+    }
+    for (const { p, head } of rows) {
+      if (head) box.append(el('div', 'muted letter', head));
       const b = el('button', 'person'); b.type = 'button';
       const top = el('div', 'ptop'); top.append(el('b', '', p.name), el('span', 'muted', ui.sort === 'new' ? 'added ' + ago(p.created) : ageText(p)));
       b.append(top);
@@ -192,8 +222,32 @@
     if (!info.childNodes.length) info.append(el('div', 'muted', 'No contact details yet. Tap Edit to add some.'));
     $('p-notes').textContent = p.notes || 'No notes yet.';
     $('p-notion').href = p.url;
+    $('pv-summarycard').classList.toggle('hidden', !p.summary);
+    $('pv-summary').textContent = p.summary || '';
+    renderMore(p);
     renderPersonTasks(p);
     loadHistory(p);
+  }
+  // Every other Notion field of the person, shown when the section is opened (empty ones as a dash).
+  function renderMore(p) {
+    const body = $('pv-more-body'); body.replaceChildren();
+    const names = (ids) => { const out = el('span'); ids.forEach((id, i) => { const q = state.items[id]; if (!q) return; if (out.childNodes.length) out.append(', '); const a = el('a', '', q.name); a.href = '#'; a.onclick = (e) => { e.preventDefault(); openSheet(q); }; out.append(a); }); return out; };
+    const add = (label, v) => {
+      const row = el('div', 'kv'); row.append(el('span', 'muted', label));
+      const empty = v == null || v === '' || (Array.isArray(v) && !v.length) || (v instanceof Node && !v.childNodes.length);
+      row.append(empty ? el('span', 'muted', '—') : v instanceof Node ? v : el('span', '', Array.isArray(v) ? v.join(', ') : String(v)));
+      body.append(row);
+    };
+    const day = (d) => (d ? new Date(d + 'T12:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+    add('Tier', p.tier); add('Contact type', p.contact_type);
+    add('Follow-up status', p.follow_up_status); add('Next contact due', day(p.next_contact_due)); add('Cadence (days)', p.cadence); add('Last enriched', day(p.last_enriched));
+    add('Target status', p.target_status); add('Target priority', p.target_priority); add('Why they matter', p.why); add('Potential intro', names(p.potential_intro_ids));
+    add('Introduced by', names(p.introduced_by_ids)); add('Introduced', names(p.introduced_ids)); add('Can introduce', names(p.can_introduce_ids)); add('Can introduce (companies)', p.can_introduce_companies);
+    add('Previous companies', p.previous_companies); add('Birthday', day(p.birthday));
+    add('Meetings', p.meetings_count); add('Open tasks', p.open_tasks); add('Needs enrichment', p.needs_enrichment); add('Review', p.review);
+    add('Last edited in Notion', p.edited ? new Date(p.edited).toLocaleDateString() : '');
+    const open = el('a', '', 'Open this page in Notion'); open.href = p.url; open.target = '_blank'; open.rel = 'noopener'; open.style.display = 'inline-block'; open.style.margin = '8px 0';
+    body.append(open);
   }
   function renderPersonTasks(p) {
     const box = $('pv-tasks'); box.replaceChildren();
@@ -276,6 +330,8 @@
     const draw = (items) => {
       const best = items.filter((h) => h.date && h.date <= today()).map((h) => h.date).concat(p.last_contact || '').sort().at(-1) || '';
       if (lastEl && current && current.id === p.id && best !== (p.last_contact || '')) lastEl.lastChild.textContent = lastText(best);
+      const kept = state.items[p.id];
+      if (kept && best > (kept.last_contact || '')) { kept.last_contact = best; persist(); render(); } // the list learns it too
       box.replaceChildren();
       if (!items.length) { box.append(el('div', 'muted', 'No meetings or interactions logged yet.')); return; }
       for (const h of items) {
@@ -426,6 +482,7 @@
   $('recFilter').oninput = () => { render(); };
   $('recSort').onchange = () => { ui.sort = $('recSort').value; store.set('cc.p.sort', ui.sort); render(); };
   $('recTier').onchange = () => { ui.tier = $('recTier').value; render(); };
+  $('recEvent').onchange = () => { ui.event = $('recEvent').value; render(); };
   $('recReload').onclick = () => sync(true);
 
   // ---- changes waiting to be sent, and notes about them ----------------------------------------------

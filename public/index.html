@@ -283,7 +283,7 @@ a{color:var(--accent)}
       </div>
       <input type="text" id="compFilter" placeholder="Search companies…" autocomplete="off">
       <div class="row" style="margin-top:8px">
-        <select id="compSort" aria-label="Sort"><option value="az">A–Z</option><option value="new">Newest first</option><option value="quiet">Longest since contact</option></select>
+        <select id="compSort" aria-label="Sort"><option value="az">A–Z</option><option value="new">Newest first</option></select>
         <button id="compNew" type="button">＋ New company</button>
       </div>
       <p class="muted" id="compCount" style="margin:8px 0 0"></p>
@@ -304,7 +304,8 @@ a{color:var(--accent)}
       </div>
       <input type="text" id="recFilter" placeholder="Search name, company, note, event…" autocomplete="off">
       <div class="row" id="recTools" style="margin-top:8px">
-        <select id="recSort" aria-label="Sort"><option value="az">A–Z</option><option value="new">Newest first</option><option value="quiet">Longest since contact</option></select>
+        <select id="recSort" aria-label="Sort"><option value="az">A–Z</option><option value="new">Newest first</option><option value="quiet">Longest since contact</option><option value="event">By event</option></select>
+        <select id="recEvent" aria-label="Event"><option value="">Any event</option></select>
         <select id="recTier" aria-label="Tier"><option value="">Any tier</option><option value="A - Key">Tier A</option><option value="B - Important">Tier B</option><option value="C - Network">Tier C</option><option value="none">No tier</option></select>
       </div>
       <p class="muted" id="recCount" style="margin:8px 0 0"></p>
@@ -467,6 +468,12 @@ a{color:var(--accent)}
         <div id="pv-tags" style="margin:6px 0"></div>
         <div id="p-actions" class="row" style="margin:8px 0"></div>
         <div id="pv-info"></div>
+        <details id="pv-more" style="margin-top:8px"><summary style="cursor:pointer;min-height:40px;display:flex;align-items:center;color:var(--mute)">All Notion details</summary><div id="pv-more-body"></div></details>
+      </section>
+      <section class="card hidden" id="pv-summarycard">
+        <h2>Relationship summary</h2>
+        <div id="pv-summary" style="white-space:pre-wrap"></div>
+        <p class="muted" style="margin:6px 0 0">Written by Notion AI from what you logged. It updates in Notion.</p>
       </section>
       <section class="card">
         <h2>Notes</h2>
