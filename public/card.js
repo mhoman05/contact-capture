@@ -224,17 +224,22 @@
   // Tabs
   let loadedAt = 0;
   function tab(name) {
+    window.__tab = name;
     const qr = name === 'qr', recent = name === 'recent', tasks = name === 'tasks';
+    const locked = name !== 'add' && window.CCLock && !CCLock.isOpen(); // People, Tasks and My QR wait for the fingerprint
     $('addView').classList.toggle('hidden', qr || recent || tasks);
-    $('qrView').classList.toggle('hidden', !qr);
-    $('recentView').classList.toggle('hidden', !recent);
-    $('tasksView').classList.toggle('hidden', !tasks);
+    $('qrView').classList.toggle('hidden', !qr || locked);
+    $('recentView').classList.toggle('hidden', !recent || locked);
+    $('tasksView').classList.toggle('hidden', !tasks || locked);
+    $('lockView').classList.toggle('hidden', !locked);
     $('tabAdd').setAttribute('aria-selected', String(!qr && !recent && !tasks));
     $('tabQr').setAttribute('aria-selected', String(qr));
     $('tabRecent').setAttribute('aria-selected', String(recent));
     $('tabTasks').setAttribute('aria-selected', String(tasks));
     $('title').textContent = qr ? 'My QR card' : recent ? 'People' : tasks ? 'Tasks' : 'Add contact';
     if (qr || recent || tasks) $('setup').classList.add('hidden');
+    if (locked) { CCLock.show(name); window.scrollTo(0, 0); return; }
+    if (!qr && !recent && !tasks && window.CCMeet) CCMeet.show();
     if (recent && window.CCRecent) CCRecent.show();
     if (recent && window.CCCompanies) CCCompanies.show();
     if (tasks && window.CCTasks) CCTasks.show();

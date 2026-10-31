@@ -23,7 +23,7 @@
   const FORMAT = 3; // bump when the people records gain a field: the phone's old copy is then read in full once
   let state = { items: {}, syncedAt: '', fullAt: '', v: FORMAT };
   let stale = true, syncing = false, loadedAt = 0, current = null, editing = false, pairs = null;
-  const ui = { filter: 'all', sort: store.get('cc.p.sort', 'az'), tier: '', event: '' };
+  const ui = { filter: 'all', sort: store.get('cc.p.sort', 'az'), tier: '', event: '', city: '' };
   const all = () => Object.values(state.items);
   const dismissed = (() => { try { return new Set(JSON.parse(store.get('cc.dupe.no', '[]'))); } catch { return new Set(); } })();
   const pairKey = (p) => [p.a.id, p.b.id].sort().join('|');
@@ -31,6 +31,26 @@
   // The day of the last contact; for someone with none logged yet, the day they were added.
   const lastSeen = (p) => p.last_contact || (p.created || '').slice(0, 10);
   const ageText = (p) => (p.last_contact ? 'last contact ' + agoDay(p.last_contact) : 'no contact logged');
+  // ---- cities (taken from the Location text) ------------------------------------------------------
+  const COUNTRIES = new Set(['spain', 'espana', 'germany', 'deutschland', 'switzerland', 'schweiz', 'suisse', 'united kingdom', 'uk', 'england', 'united states', 'usa', 'us', 'france', 'italy', 'italia', 'portugal', 'netherlands', 'nederland', 'austria', 'osterreich', 'belgium', 'luxembourg', 'ireland', 'sweden', 'norway', 'denmark', 'finland', 'poland', 'malta', 'cyprus', 'greece', 'turkey', 'uae', 'united arab emirates', 'singapore', 'hong kong', 'canada']);
+  const CITY_NAMES = { 'frankfurt am main': 'Frankfurt', 'frankfurt main': 'Frankfurt', zurich: 'Zurich', munchen: 'Munich', koln: 'Cologne', geneve: 'Geneva', lisboa: 'Lisbon', wien: 'Vienna', roma: 'Rome', milano: 'Milan', 'new york city': 'New York', nyc: 'New York', 'palma de mallorca': 'Palma' };
+  /** { key, name } of the city in a Location text, or null. "Mainzer Landstraße 10, 60325 Frankfurt am Main" and "Madrid, Community of Madrid, Spain" both work. */
+  function cityOf(location) {
+    const text = String(location || '').trim();
+    if (!text) return null;
+    const parts = text.split(/[,;\n]/).map((x) => x.trim()).filter(Boolean);
+    const POST = /(^|\s)(\d{4,5}|[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})(\s|$)/; // 60325 · 8001 · SW1A 2AA
+    let city = '';
+    const i = parts.findIndex((x) => POST.test(x) && /\p{L}{3,}/u.test(x.replace(POST, ' ')));
+    if (i >= 0) city = parts[i].replace(POST, ' ').trim();                       // an address: the city is in the part with the postcode
+    else if (parts.length > 1 && /\d/.test(parts[0])) city = parts.filter((x) => !COUNTRIES.has(fold(x)) && !/\d/.test(x)).pop() || ''; // a street address without a postcode
+    else city = parts.find((x) => !COUNTRIES.has(fold(x))) || '';                // "City, Region, Country": the first part that is not a country
+    city = city.replace(/\b(greater|metropolitan area|area|region)\b/gi, '').replace(/\s+/g, ' ').trim();
+    if (!city || /\d/.test(city)) return null;
+    const key = fold(city);
+    return { key: CITY_NAMES[key] ? fold(CITY_NAMES[key]) : key, name: CITY_NAMES[key] || city };
+  }
+  const cityKey = (p) => { const c = cityOf(p.location); return c ? c.key : '__none'; };
   const due = (p) => !!p.next_followup && p.next_followup <= today();
   function updateBadge() {
     const n = all().filter(due).length;
@@ -101,6 +121,7 @@
     const quietBefore = plusDays(-90);
     let list = all().filter((p) => (ui.filter === 'review' ? p.needs_review : ui.filter === 'due' ? due(p) : ui.filter === 'quiet' ? lastSeen(p) < quietBefore : true))
       .filter((p) => !ui.event || p.events.includes(ui.event))
+      .filter((p) => !ui.city || cityKey(p) === ui.city)
       .filter((p) => !ui.tier || (ui.tier === 'none' ? !p.tier : p.tier === ui.tier))
       .filter((p) => !q || fold([p.name, p.company, p.role, p.email, p.phone, p.how, p.notes, p.events.join(' '), p.location, p.tier].join(' ')).includes(q));
     if (ui.filter === 'due') list.sort((a, b) => a.next_followup.localeCompare(b.next_followup));
@@ -126,6 +147,29 @@
     $('recEvent').value = ui.event;
   }
 
+  let citiesExpanded = false;
+  function renderCities() {
+    const box = $('recCities');
+    const counts = new Map(); // key -> { name, n, spellings }
+    for (const p of all()) {
+      const c = cityOf(p.location); const key = c ? c.key : '__none';
+      const e = counts.get(key) || { name: c ? c.name : 'No city', n: 0, spell: new Map() };
+      e.n++; if (c) e.spell.set(c.name, (e.spell.get(c.name) || 0) + 1); counts.set(key, e);
+    }
+    for (const e of counts.values()) if (e.spell.size) e.name = [...e.spell.entries()].sort((a, b) => b[1] - a[1])[0][0]; // the most used spelling
+    const list = [...counts.entries()].filter(([k]) => k !== '__none').sort((a, b) => b[1].n - a[1].n || a[1].name.localeCompare(b[1].name));
+    if (ui.city && !counts.has(ui.city)) ui.city = '';
+    box.classList.toggle('hidden', list.length < 2);
+    const top = citiesExpanded ? list : list.slice(0, 5);
+    const chips = top.map(([k, e]) => { const b = el('button', 'chip', e.name + ' ' + e.n); b.type = 'button'; b.dataset.city = k; b.setAttribute('aria-pressed', String(ui.city === k)); b.onclick = () => { ui.city = ui.city === k ? '' : k; render(); }; return b; });
+    // a chosen city that is not among the first five stays visible
+    if (ui.city && !top.some(([k]) => k === ui.city) && counts.has(ui.city)) { const e = counts.get(ui.city); const b = el('button', 'chip', e.name + ' ' + e.n); b.type = 'button'; b.dataset.city = ui.city; b.setAttribute('aria-pressed', 'true'); b.onclick = () => { ui.city = ''; render(); }; chips.unshift(b); }
+    if (list.length > 5) { const more = el('button', 'chip', citiesExpanded ? 'Fewer' : '+' + (list.length - 5)); more.type = 'button'; more.onclick = () => { citiesExpanded = !citiesExpanded; renderCities(); }; chips.push(more); }
+    if (counts.has('__none') && citiesExpanded) { const e = counts.get('__none'); const b = el('button', 'chip', 'No city ' + e.n); b.type = 'button'; b.dataset.city = '__none'; b.setAttribute('aria-pressed', String(ui.city === '__none')); b.onclick = () => { ui.city = ui.city === '__none' ? '' : '__none'; render(); }; chips.push(b); }
+    box.replaceChildren(el('span', 'muted', 'City'), ...chips);
+    box.style.flexWrap = 'wrap'; box.style.alignItems = 'center';
+  }
+
   function render() {
     const dupMode = ui.filter === 'dupes';
     $('recChips').querySelector('[data-f=dupes]').textContent = 'Duplicates' + (pairs ? ' (' + pairs.filter((p) => !dismissed.has(pairKey(p))).length + ')' : '');
@@ -140,6 +184,7 @@
     updateBadge(); renderOutbox();
     if (dupMode) { renderDupes(); return; }
 
+    renderCities();
     const list = visible();
     $('recCount').textContent = list.length === all().length ? all().length + ' people' : list.length + ' of ' + all().length + ' people';
     const box = $('recList'); box.replaceChildren();
@@ -388,6 +433,20 @@
     return q;
   }
 
+  /** Changes fields of one person without opening them (used by the meeting briefing). 'saved', 'queued' (no signal) or 'error'. */
+  async function quickUpdate(id, fields) {
+    const p = state.items[id]; if (!p) return 'error';
+    const body = { id, today: today(), ...fields };
+    try {
+      const { person } = await api('/people/update', { method: 'POST', body: JSON.stringify(body) });
+      state.items[id] = norm(person); await persist(); render();
+      return 'saved';
+    } catch (e) {
+      if (e.retryable) { await queuePersonEdit(p, body, 'Edit ' + p.name); return 'queued'; }
+      return 'error';
+    }
+  }
+
   async function save(extra) {
     if (!current) return;
     const body = { id: current.id, today: today(), ...extra };
@@ -521,6 +580,9 @@
 
   window.CCRecent = {
     people: () => all(),
+    get: (id) => state.items[id] || null,
+    quickUpdate,
+    cityOf,
     openPerson(id) { const p = state.items[id]; if (p) openSheet(p); },
     show() { render(); if (window.CCOutbox) CCOutbox.flush(); if (!syncing && (stale || Date.now() - loadedAt > 60000)) sync(); },
     invalidate() { stale = true; },

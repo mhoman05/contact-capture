@@ -24,6 +24,13 @@ export class FakeNotion {
     if (filter.timestamp === 'created_time') return (row.created ?? new Date(Date.UTC(2026, 9, 1) + Number(row.id.replace(/\D/g, '')) * 60000).toISOString()) > filter.created_time.after;
     const prop = row.properties[filter.property];
     if (filter.timestamp === 'last_edited_time') return (row.edited ?? new Date(Date.UTC(2026, 9, 1) + Number(row.id.replace(/\D/g, '')) * 60000).toISOString()) > filter.last_edited_time.after;
+    if (filter.date) {
+      const d = (prop?.date?.start ?? '').slice(0, 10);
+      if (!d) return false;
+      if (filter.date.on_or_after !== undefined && d < filter.date.on_or_after) return false;
+      if (filter.date.on_or_before !== undefined && d > filter.date.on_or_before) return false;
+      return true;
+    }
     if (filter.status) return (prop?.status?.name ?? 'Not started') !== filter.status.does_not_equal;
     if (filter.relation) return (prop?.relation ?? []).some((r: any) => r.id === filter.relation.contains);
     if (filter.email) return (prop?.email ?? null) === filter.email.equals;

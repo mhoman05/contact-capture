@@ -141,6 +141,15 @@ a{color:var(--accent)}
       <button id="save" class="primary">Save</button>
     </div>
     <p class="muted" id="setupMsg" role="status"></p>
+    <h2 style="margin-top:20px">App lock</h2>
+    <label class="check"><input type="checkbox" id="lockOn"><span>Lock People, Tasks and My QR with my fingerprint</span></label>
+    <p class="muted" id="lockHelp" style="margin:4px 0 0"></p>
+    <div id="lockOpts" class="hidden">
+      <label for="lockMins">Lock again after leaving the app for</label>
+      <select id="lockMins" style="max-width:12em"><option value="0">At once</option><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="60">1 hour</option></select>
+      <div class="row" style="margin-top:8px"><button id="lockNow" type="button">🔒 Lock now</button><button id="lockReset" type="button" class="chip">Can't unlock? Reset</button></div>
+    </div>
+    <p class="muted" id="lockMsg2" role="status" style="margin:4px 0 0"></p>
     <h2 style="margin-top:20px">Backup</h2>
     <p class="muted" style="margin:0 0 8px">One file with everything: spreadsheets of people, companies, tasks, meetings and interactions, all contacts as a contact file, and a full copy. Your data lives in Notion; this is your own copy.</p>
     <button id="bkBtn" type="button">⬇ Export everything</button>
@@ -149,6 +158,11 @@ a{color:var(--accent)}
   </section>
 
   <div id="addView" style="display:contents">
+  <section class="card hidden" id="meetCard">
+    <h2>Next meetings</h2>
+    <div id="meetList"></div>
+    <p class="muted" id="meetMsg" role="status" style="margin:6px 0 0"></p>
+  </section>
   <section class="card hidden" id="queue">
     <h2 id="qTitle"></h2>
     <p class="muted" style="margin:0 0 10px">Saved on this phone because there was no connection. They are sent by themselves once you are online and the app is open.</p>
@@ -229,6 +243,21 @@ a{color:var(--accent)}
   <section class="card hidden" id="result" aria-live="polite"></section>
   </div>
 
+  <div id="lockView" class="hidden" style="display:contents">
+    <section class="card" style="position:relative;min-height:320px;overflow:hidden">
+      <div aria-hidden="true" style="filter:blur(6px);opacity:.5;display:grid;gap:10px">
+        <div style="height:46px;border-radius:10px;background:var(--soft)"></div><div style="height:46px;border-radius:10px;background:var(--soft)"></div>
+        <div style="height:46px;border-radius:10px;background:var(--soft)"></div><div style="height:46px;border-radius:10px;background:var(--soft)"></div>
+      </div>
+      <div style="position:absolute;left:14px;right:14px;top:50%;transform:translateY(-50%);background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.18)">
+        <div style="font-size:34px">☝</div>
+        <h2 id="lockTitle" style="margin:6px 0 2px;font-size:17px">Locked</h2>
+        <div class="muted" id="lockMsg" role="status">Touch the fingerprint sensor to open.</div>
+        <button id="lockBtn" class="primary" type="button" style="margin-top:10px">Unlock</button>
+      </div>
+    </section>
+  </div>
+
   <div id="tasksView" class="hidden" style="display:contents">
     <section class="card" id="tkAdd">
       <div class="row" style="align-items:center;flex-wrap:nowrap">
@@ -302,6 +331,7 @@ a{color:var(--accent)}
         <button class="chip" type="button" data-f="quiet">Quiet 90+ days</button>
         <button class="chip" type="button" data-f="dupes">Duplicates</button>
       </div>
+      <div class="chips chipsrow" id="recCities" style="margin:0 0 10px"></div>
       <input type="text" id="recFilter" placeholder="Search name, company, note, event…" autocomplete="off">
       <div class="row" id="recTools" style="margin-top:8px">
         <select id="recSort" aria-label="Sort"><option value="az">A–Z</option><option value="new">Newest first</option><option value="quiet">Longest since contact</option><option value="event">By event</option></select>
@@ -381,6 +411,27 @@ a{color:var(--accent)}
     </section>
     <button class="primary" id="l-save" type="button">Log it in Notion</button>
     <p class="muted" id="l-msg" role="status" style="margin:0"></p>
+  </div>
+</div>
+
+<div class="sheet hidden" id="meetSheet" role="dialog" aria-label="Meeting briefing">
+  <div class="inner">
+    <div class="row" style="align-items:center"><button id="mb-close" type="button" style="flex:none">← Back</button><a id="mb-notion" target="_blank" rel="noopener" style="flex:none;margin-left:auto">Open in Notion ↗</a></div>
+    <section class="card">
+      <h2 id="mb-title" style="font-size:20px;margin:0"></h2>
+      <div class="muted" id="mb-when"></div>
+      <div id="mb-topics" class="muted" style="white-space:pre-wrap;margin-top:6px"></div>
+    </section>
+    <div id="mb-people" style="display:grid;gap:14px"></div>
+    <section class="card">
+      <h2>After the meeting</h2>
+      <label for="mb-note">What was discussed, next step</label>
+      <textarea id="mb-note" placeholder="Agreed a demo next week…"></textarea>
+      <div id="mb-fu-wrap"><label for="mb-fu">Follow-up with the attendees</label>
+      <select id="mb-fu"><option value="">Leave as it is</option><option value="3">In 3 days</option><option value="7">In 1 week</option><option value="14">In 2 weeks</option><option value="30">In 1 month</option></select></div>
+      <button class="primary" id="mb-save" type="button" style="margin-top:10px">Save notes</button>
+      <p class="muted" id="mb-msg" role="status" style="margin:6px 0 0"></p>
+    </section>
   </div>
 </div>
 
@@ -852,12 +903,14 @@ a{color:var(--accent)}
   loadShared();
 })();
 </script>
+<script src="lock.js"></script>
 <script src="card.js"></script>
 <script src="events.js"></script>
 <script src="tasks.js"></script>
 <script src="outbox.js"></script>
 <script src="recent.js"></script>
 <script src="companies.js"></script>
+<script src="meetings.js"></script>
 <script src="vcard.js"></script>
 <script src="queue.js"></script>
 <script src="export.js"></script>

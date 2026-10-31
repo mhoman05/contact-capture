@@ -8,6 +8,7 @@ import { createTask, deleteTask, listTasks, parseTaskCreate, parseTaskUpdate, up
 import { vcardResponse } from './vcard';
 import { lookup, parseLookupRequest } from './lookup';
 import { exportInteractions, exportMeetings } from './export';
+import { addMeetingNotes, isDay, listMeetings } from './meetings';
 import { GoogleError, parseGoogleContact, saveToGoogle } from './google';
 import { createEvent, getEvent, listEvents, parseNewEvent } from './events';
 import { readMe, updateMeValue } from './me';
@@ -131,6 +132,38 @@ async function handleMe(req: Request, env: Env, path: string): Promise<Response>
     }
     const item = await updateMeValue(notion, env.NOTION_ME_DB, body.id, body.value.trim().slice(0, 1900));
     return item ? json({ item }, 200) : json({ error: 'That row is not in My sharing details.' }, 404);
+  } catch (err) {
+    if (err instanceof NotionError) return json({ error: err.message }, err.status);
+    console.error(err);
+    return json({ error: 'Unexpected error.' }, 500);
+  }
+}
+
+/** Meetings for the "Next meetings" card, and notes added after a meeting. */
+async function handleMeetings(req: Request, env: Env, url: URL): Promise<Response> {
+  if (!env.NOTION_MEETINGS_DB) return json({ error: 'NOTION_MEETINGS_DB is not set.' }, 503);
+  const notion = new NotionClient(env.NOTION_TOKEN);
+  try {
+    if (url.pathname === '/meetings/upcoming') {
+      const day = (n: number) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+      const from = url.searchParams.get('from') ?? day(-1);
+      const to = url.searchParams.get('to') ?? day(8);
+      if (!isDay(from) || !isDay(to)) return json({ error: 'from and to must look like 2026-10-28.' }, 400);
+      return json({ meetings: await listMeetings(notion, env.NOTION_MEETINGS_DB, from, to) }, 200);
+    }
+    const raw = await req.text();
+    if (raw.length > 10_000) return json({ error: 'Request too large.' }, 413);
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return json({ error: 'Body is not valid JSON.' }, 400);
+    }
+    const note = typeof body.note === 'string' ? body.note.trim().slice(0, 1500) : '';
+    if (typeof body.id !== 'string' || !/^[0-9a-z-]{6,40}$/i.test(body.id) || !note) return json({ error: 'Send the id of the meeting and a note.' }, 400);
+    const today = isDay(body.today) ? body.today : new Date().toISOString().slice(0, 10);
+    const meeting = await addMeetingNotes(notion, env.NOTION_MEETINGS_DB, body.id, note, today);
+    return meeting ? json({ meeting }, 200) : json({ error: 'That meeting is not in your Meetings database.' }, 404);
   } catch (err) {
     if (err instanceof NotionError) return json({ error: err.message }, err.status);
     console.error(err);
@@ -400,7 +433,7 @@ export default {
     // A contact card shared from "My QR": open to save the contact. Public, see vcard.ts.
     if (url.pathname === '/v') return req.method === 'GET' ? vcardResponse(url.searchParams.get('c'), url.searchParams.get('f') === '1') : json({ error: 'Use GET.' }, 405);
     // Everything else is a static file of the app.
-    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST', '/people/list': 'GET', '/people/history': 'GET', '/status': 'GET', '/tasks/list': 'GET', '/tasks/create': 'POST', '/tasks/update': 'POST', '/tasks/delete': 'POST', '/companies/list': 'GET', '/companies/history': 'GET', '/companies/create': 'POST', '/companies/update': 'POST', '/interactions/create': 'POST', '/contacts/google': 'POST', '/scan/lookup': 'POST', '/export/interactions': 'GET', '/export/meetings': 'GET' };
+    const API: Record<string, string> = { '/capture': 'POST', '/me': 'GET', '/me/update': 'POST', '/events': 'GET', '/events/create': 'POST', '/people/update': 'POST', '/people/delete': 'POST', '/people/duplicates': 'GET', '/people/merge': 'POST', '/people/list': 'GET', '/people/history': 'GET', '/status': 'GET', '/tasks/list': 'GET', '/tasks/create': 'POST', '/tasks/update': 'POST', '/tasks/delete': 'POST', '/companies/list': 'GET', '/companies/history': 'GET', '/companies/create': 'POST', '/companies/update': 'POST', '/interactions/create': 'POST', '/contacts/google': 'POST', '/scan/lookup': 'POST', '/export/interactions': 'GET', '/export/meetings': 'GET', '/meetings/upcoming': 'GET', '/meetings/notes': 'POST' };
     const method = API[url.pathname];
     if (!method) {
       return env.ASSETS ? env.ASSETS.fetch(req) : json({ error: 'Not found.' }, 404);
@@ -420,6 +453,7 @@ export default {
     if (url.pathname === '/contacts/google') return handleGoogleContact(req, env);
     if (url.pathname === '/scan/lookup') return handleLookup(req);
     if (url.pathname.startsWith('/export/')) return handleExport(env, url);
+    if (url.pathname.startsWith('/meetings/')) return handleMeetings(req, env, url);
     if (url.pathname.startsWith('/companies/')) return handleCompanies(req, env, url);
     if (url.pathname.startsWith('/tasks/')) return handleTasks(req, env, url);
     if (url.pathname.startsWith('/people/')) return handlePeople(req, env, url);
