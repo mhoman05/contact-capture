@@ -427,7 +427,7 @@ async function handleEvents(req: Request, env: Env, path: string): Promise<Respo
 // ---- shared backup of the phone apps -------------------------------------------------------------
 // My Day and Racket Rankings live at other web addresses, so the browser needs to be told they may call this service (CORS).
 // Only those two origins are allowed, and every call still needs the access token.
-const BACKUP_ORIGINS = ['https://mydayappmh.github.io', 'https://matthias-sport.github.io'];
+const BACKUP_ORIGINS = ['https://mydayappmh.github.io', 'https://matthias-sport.github.io', 'https://gymmh.github.io'];
 function withCors(req: Request, res: Response): Response {
   const origin = req.headers.get('Origin') ?? '';
   if (!BACKUP_ORIGINS.includes(origin)) return res;
@@ -560,3 +560,4 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
+
