@@ -1,6 +1,6 @@
 // A tiny in-memory stand-in for the parts of the Notion API the worker uses.
 type Props = Record<string, any>;
-interface Row { id: string; db: string; properties: Props; archived?: boolean; edited?: string; created?: string }
+interface Row { id: string; db: string; properties: Props; archived?: boolean; edited?: string; created?: string; children?: any[] }
 
 export class FakeNotion {
   rows: Row[] = [];
@@ -63,7 +63,16 @@ export class FakeNotion {
     if (url.pathname === '/v1/pages' && method === 'POST') {
       const row = this.seed(body.parent.database_id, this.normalise(body.properties));
       row.created = new Date().toISOString(); // pages made through the API are new
+      if (body.children) row.children = body.children.map((b: any) => (b.type === 'code' ? { ...b, code: { ...b.code, rich_text: b.code.rich_text.map((t: any) => ({ ...t, plain_text: t.text.content })) } } : b));
       return ok(this.page(row));
+    }
+    m = url.pathname.match(/^\/v1\/blocks\/([^/]+)\/children$/);
+    if (m && method === 'GET') {
+      const all = this.rows.find((r) => r.id === m![1])?.children ?? [];
+      const start = Number(url.searchParams.get('start_cursor') ?? '0');
+      const size = Number(url.searchParams.get('page_size') ?? '100');
+      const more = start + size < all.length;
+      return ok({ results: all.slice(start, start + size), has_more: more, next_cursor: more ? String(start + size) : null });
     }
     m = url.pathname.match(/^\/v1\/pages\/([^/]+)$/);
     if (m && method === 'GET') {

@@ -14,6 +14,7 @@ export interface Env {
   NOTION_EVENTS_DB?: string; // Events database
   NOTION_MEETINGS_DB?: string; // Meetings (calendar) database, for a person's history
   NOTION_TASKS_DB?: string; // Task Database
+  NOTION_BACKUPS_DB?: string; // "App backups": the shared backup of the phone apps
   MODEL?: string;
   // Static files of the app (the public/ folder), served by Cloudflare. Absent in unit tests.
   ASSETS?: Fetcher;

@@ -24,6 +24,7 @@ export async function checkNotion(notion: NotionClient, env: Env): Promise<Notio
     ['Meetings', env.NOTION_MEETINGS_DB],
     ['My sharing details', env.NOTION_ME_DB],
     ['Tasks', env.NOTION_TASKS_DB],
+    ['App backups', env.NOTION_BACKUPS_DB],
   ];
   const databases = await Promise.all(
     dbs

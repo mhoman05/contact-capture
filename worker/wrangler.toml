@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 [assets]
 directory = "../public"
 binding = "ASSETS"
-run_worker_first = ["/v", "/capture", "/me", "/me/update", "/events", "/events/create", "/people/update", "/people/delete", "/people/duplicates", "/people/merge", "/people/list", "/people/history", "/status", "/tasks/list", "/tasks/create", "/tasks/update", "/tasks/delete", "/companies/list", "/companies/history", "/companies/create", "/companies/update", "/interactions/create", "/contacts/google", "/scan/lookup", "/export/interactions", "/export/meetings", "/meetings/upcoming", "/meetings/notes", "/health", "/share-target"]
+run_worker_first = ["/v", "/capture", "/me", "/me/update", "/events", "/events/create", "/people/update", "/people/delete", "/people/duplicates", "/people/merge", "/people/list", "/people/history", "/status", "/tasks/list", "/tasks/create", "/tasks/update", "/tasks/delete", "/companies/list", "/companies/history", "/companies/create", "/companies/update", "/interactions/create", "/contacts/google", "/scan/lookup", "/export/interactions", "/export/meetings", "/meetings/upcoming", "/meetings/notes", "/backup/save", "/backup/load", "/backup/list", "/health", "/share-target"]
 
 [vars]
 # Notion databases of the Work CRM (People, Companies, Interactions).
@@ -22,6 +22,8 @@ NOTION_EVENTS_DB = "f1680991265045f2b99752fa79148c2a"
 NOTION_MEETINGS_DB = "6311b06337a4468bb661111f32c063b2"
 # The Task Database (it lives under a different Notion page than the CRM: connect it too, see README).
 NOTION_TASKS_DB = "2e2e528fadf88195bcedf39c537ae294"
+# Shared backup of the phone apps (My Day, Racket Rankings, Pocket CRM): the Notion database "App backups" under Work CRM.
+NOTION_BACKUPS_DB = "c0e7a3f504ad45c0bc3d346ba89af2a1"
 # MODEL = "claude-opus-5-5"   # optional override; this is the default
 
 # Secrets, never put these in this file: ANTHROPIC_API_KEY, NOTION_TOKEN, CAPTURE_TOKEN

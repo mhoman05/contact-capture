@@ -132,6 +132,7 @@ a{color:var(--accent)}
     <p class="muted">The access token you chose is stored only on this phone.</p>
     <label for="wtok">Access token</label>
     <input type="password" id="wtok" autocomplete="off">
+    <div class="row" style="margin:-2px 0 8px"><button id="tokShow" type="button" class="chip">👁 Show</button><button id="tokCopy" type="button" class="chip">📋 Copy</button></div>
     <div class="row" style="margin-bottom:6px"><button id="chk" type="button">Check Notion connections</button></div>
     <div id="chkOut"></div>
     <label for="fu">Remind me to follow up after (days, 0 = no reminder)</label>
@@ -150,6 +151,11 @@ a{color:var(--accent)}
       <div class="row" style="margin-top:8px"><button id="lockNow" type="button">🔒 Lock now</button><button id="lockReset" type="button" class="chip">Can't unlock? Reset</button></div>
     </div>
     <p class="muted" id="lockMsg2" role="status" style="margin:4px 0 0"></p>
+    <h2 style="margin-top:20px">Shared backup (Notion)</h2>
+    <p class="muted" style="margin:0 0 8px">Saves what is only on this phone (saved scans, My QR choices, hidden duplicate pairs, settings) into the Notion database <b>App backups</b>, next to the backups of My Day and Racket Rankings. It runs by itself once a day when you open the app.</p>
+    <div class="row"><button id="sbBtn" type="button">☁ Back up now</button><button id="sbRestore" type="button">Restore</button></div>
+    <div id="sbList" style="margin-top:8px"></div>
+    <p class="muted" id="sbMsg" role="status" style="margin:4px 0 0"></p>
     <h2 style="margin-top:20px">Backup</h2>
     <p class="muted" style="margin:0 0 8px">One file with everything: spreadsheets of people, companies, tasks, meetings and interactions, all contacts as a contact file, and a full copy. Your data lives in Notion; this is your own copy.</p>
     <button id="bkBtn" type="button">⬇ Export everything</button>
@@ -679,6 +685,14 @@ a{color:var(--accent)}
   // The event is remembered by events.js; notes are per person and start empty every time.
   $('meet').checked = store.get('cc.meet') === '1';
   $('meet').onchange = () => store.set('cc.meet', $('meet').checked ? '1' : '0');
+  // Show or copy the access token, e.g. to paste it into My Day or Racket Rankings for the shared backup.
+  $('tokShow').onclick = () => { const f = $('wtok'), show = f.type === 'password'; f.type = show ? 'text' : 'password'; $('tokShow').textContent = show ? '🙈 Hide' : '👁 Show'; };
+  $('tokCopy').onclick = async () => {
+    const t = $('wtok').value || store.get('cc.tok'), m = $('setupMsg');
+    if (!t) { m.textContent = 'There is no token on this phone yet.'; return; }
+    try { await navigator.clipboard.writeText(t); m.textContent = 'Token copied. Paste it where it is asked for, then clear the clipboard if you like.'; }
+    catch { $('wtok').type = 'text'; $('wtok').select(); m.textContent = 'Could not copy by itself: the token is now shown and selected, so use the phone\'s Copy.'; }
+  };
   $('fu').value = store.get('cc.fu', '7');
   $('fu').onchange = () => { const n = Math.max(0, Math.min(90, parseInt($('fu').value, 10) || 0)); $('fu').value = String(n); store.set('cc.fu', String(n)); };
   $('auto').checked = store.get('cc.auto') === '1';
@@ -914,5 +928,6 @@ a{color:var(--accent)}
 <script src="vcard.js"></script>
 <script src="queue.js"></script>
 <script src="export.js"></script>
+<script src="sharedbackup.js"></script>
 </body>
 </html>

@@ -12,6 +12,7 @@ import { addMeetingNotes, isDay, listMeetings } from './meetings';
 import { GoogleError, parseGoogleContact, saveToGoogle } from './google';
 import { createEvent, getEvent, listEvents, parseNewEvent } from './events';
 import { readMe, updateMeValue } from './me';
+import { isApp, listBackups, loadBackup, parseSave, saveBackup } from './backup';
 import { deletePerson, findDuplicates, listPeople, mergePeople, parsePatch, personHistory, updatePersonFields } from './people';
 import { NotionClient, NotionError, pageTitle } from './notion';
 import { cleanEmail, cleanLinkedInLink, cleanPhone, cleanTelegram, cleanWebsite, nonEmpty } from './normalize';
@@ -423,11 +424,64 @@ async function handleEvents(req: Request, env: Env, path: string): Promise<Respo
   }
 }
 
+// ---- shared backup of the phone apps -------------------------------------------------------------
+// My Day and Racket Rankings live at other web addresses, so the browser needs to be told they may call this service (CORS).
+// Only those two origins are allowed, and every call still needs the access token.
+const BACKUP_ORIGINS = ['https://mydayappmh.github.io', 'https://matthias-sport.github.io'];
+function withCors(req: Request, res: Response): Response {
+  const origin = req.headers.get('Origin') ?? '';
+  if (!BACKUP_ORIGINS.includes(origin)) return res;
+  const out = new Response(res.body, res);
+  out.headers.set('Access-Control-Allow-Origin', origin);
+  out.headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  out.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  out.headers.set('Access-Control-Max-Age', '86400');
+  out.headers.append('Vary', 'Origin');
+  return out;
+}
+const BACKUP_BODY_MAX = 500_000;
+async function handleBackup(req: Request, env: Env, url: URL): Promise<Response> {
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204 });
+  const want = url.pathname === '/backup/save' ? 'POST' : 'GET';
+  if (!['/backup/save', '/backup/load', '/backup/list'].includes(url.pathname)) return json({ error: 'Not found.' }, 404);
+  if (req.method !== want) return json({ error: `Use ${want}.` }, 405);
+  const auth = req.headers.get('Authorization') ?? '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!env.CAPTURE_TOKEN || !token || !(await secretsMatch(token, env.CAPTURE_TOKEN))) return json({ error: 'Wrong or missing access token.' }, 401);
+  if (!env.NOTION_BACKUPS_DB) return json({ error: 'NOTION_BACKUPS_DB is not set.' }, 503);
+  const notion = new NotionClient(env.NOTION_TOKEN);
+  try {
+    if (url.pathname === '/backup/list') return json({ backups: await listBackups(notion, env.NOTION_BACKUPS_DB) }, 200);
+    if (url.pathname === '/backup/load') {
+      const app = url.searchParams.get('app');
+      if (!isApp(app)) return json({ error: 'app must be myday, rankings or crm.' }, 400);
+      const b = await loadBackup(notion, env.NOTION_BACKUPS_DB, app);
+      return b ? json(b, 200) : json({ error: 'There is no backup of that app yet.' }, 404);
+    }
+    const raw = await req.text();
+    if (raw.length > BACKUP_BODY_MAX) return json({ error: 'Request too large.' }, 413);
+    let body: unknown;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return json({ error: 'Body is not valid JSON.' }, 400);
+    }
+    const parsed = parseSave(body);
+    if (typeof parsed === 'string') return json({ error: parsed }, 400);
+    return json({ backup: await saveBackup(notion, env.NOTION_BACKUPS_DB, parsed) }, 200);
+  } catch (err) {
+    if (err instanceof NotionError) return json({ error: err.message }, err.status);
+    console.error(err);
+    return json({ error: 'Unexpected error.' }, 500);
+  }
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
 
     if (url.pathname === '/health') return json({ ok: true }, 200);
+    if (url.pathname.startsWith('/backup/')) return withCors(req, await handleBackup(req, env, url));
     // Android posts shared files here; the app's service worker normally intercepts it. If it is not active yet, just open the app.
     if (url.pathname === '/share-target') return Response.redirect(new URL('/', url).href, 303);
     // A contact card shared from "My QR": open to save the contact. Public, see vcard.ts.
