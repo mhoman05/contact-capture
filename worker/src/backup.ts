@@ -3,9 +3,9 @@
 // the last few kept). The service never reads what is inside: the apps alone know their format. Restoring reads the newest row back.
 import type { NotionClient, NotionPage } from './notion';
 
-export const BACKUP_APPS = ['myday', 'rankings', 'crm', 'gym'] as const;
+export const BACKUP_APPS = ['myday', 'rankings', 'crm', 'gym', 'library'] as const;
 export type BackupApp = (typeof BACKUP_APPS)[number];
-export const APP_NAMES: Record<BackupApp, string> = { myday: 'My Day', rankings: 'Racket Rankings', crm: 'Pocket CRM', gym: 'Gym' };
+export const APP_NAMES: Record<BackupApp, string> = { myday: 'My Day', rankings: 'Racket Rankings', crm: 'Pocket CRM', gym: 'Gym', library: 'Library' };
 const MAX_DATA = 400_000; // characters, i.e. about 1.5 MB of text before compression; also keeps one Notion request under its size limit
 const KEEP = 3; // backups kept per app; older ones go to Notion's trash
 const CHUNK = 2000; // Notion's limit for one piece of text
