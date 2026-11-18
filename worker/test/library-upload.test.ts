@@ -1,7 +1,7 @@
 import { it, expect } from "vitest";
 import { FakeNotion } from "./fake-notion";
 import { NotionClient } from "../src/notion";
-import { libraryUpload, digest, PART } from "../src/backup";
+import { libraryUpload, libraryStatus, digest, PART } from "../src/backup";
 import { loadBackup, saveBackup } from "../src/backup";
 it("keeps incomplete data out of restore, resumes and verifies complete exact data with duplicate-safe chunks", async () => {
   const f = new FakeNotion(),
@@ -99,4 +99,12 @@ it("protects the old snapshot even when a legacy client saves", async()=>{
   for(let j=0;j<5;j++)await saveBackup(n,db,{app:"library",data:"raw:QUJE",device:"legacy"});
   expect(f.rows[0].archived).not.toBe(true);
   expect(f.rows.filter(p=>!p.archived)).toHaveLength(4);
+});
+
+it("passes bounded opaque Notion cursors through unchanged",async()=>{
+  let received:any;
+  const n:any={queryPage:async(_db:string,b:any)=>{received=b.start_cursor;return {results:[],has_more:false,next_cursor:null};}};
+  const cursor="opaque_cursor:v2/segment+value=";
+  await libraryStatus(n,"books","ideas","books",cursor);
+  expect(received).toBe(cursor);
 });
