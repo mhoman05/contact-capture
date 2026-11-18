@@ -45,7 +45,7 @@ async function blocks(id){let out=[],cursor='';do{const p=await notion('/blocks/
       let errorCode='';if(!r.ok){try{const e=JSON.parse(body).error;errorCode=e==='Invalid status cursor.'?'invalid-cursor':e?.startsWith('Notion error 400:')?'notion-400':e?.startsWith('Notion cannot see')?'notion-permission':'other';}catch{errorCode='unreadable';}}calls.push({path:req.url,method:req.method,bytes:Buffer.byteLength(text),status:r.status,ms:Date.now()-t,...(errorCode?{errorCode}:{})});
       if(req.url.endsWith('/part')&&drop&&r.ok&&JSON.parse(text).i===3){drop=false;req.socket.destroy();return;}
       res.writeHead(r.status,{'Content-Type':'application/json',...(r.headers.get('Retry-After')?{'Retry-After':r.headers.get('Retry-After')}:{})});res.end(body);
-    }catch{res.writeHead(502);res.end('{"error":"Verification proxy request failed"}');}
+    }catch(e){calls.push({path:req.url,method:req.method,status:502,errorType:e.name});res.writeHead(502);res.end('{"error":"Verification proxy request failed"}');}
   }).listen(0,'127.0.0.1');
   await new Promise(r=>server.listening?r():server.once('listening',r));
   const browser=await chromium.launch();
@@ -63,7 +63,7 @@ async function blocks(id){let out=[],cursor='';do{const p=await notion('/blocks/
       phase='first-export';const one=await libraryRunExport(projection);phase='second-export';const two=await libraryRunExport(projection);
       return {books:loaded.object.books.length,takeaways:one.takeaways_unchanged,secondTakeaways:two.takeaways_unchanged,fullMatch:true,localUnchanged:JSON.stringify(S.books)===JSON.stringify(object.books),restoredExactly:true,saved:!!saved};}catch(e){return {ok:false,phase,errorType:e.name};}
     },{object,url:'http://127.0.0.1:'+server.address().port});
-    stage='browser-result-'+(result.phase||'complete');assert(result.fullMatch&&result.localUnchanged&&result.saved);
+    stage='browser-result-'+(result.phase||'complete')+'-'+(result.errorType||'ok');assert(result.fullMatch&&result.localUnchanged&&result.saved);
     assert.equal(result.books,314);assert.equal(result.takeaways,706);assert.equal(result.secondTakeaways,706);
     assert.equal(calls.filter(x=>x.path==='/backup/library-export').length,0,'Unchanged export must send zero writes');
     assert(calls.every(x=>x.status===200),'Every forwarded request must succeed');
