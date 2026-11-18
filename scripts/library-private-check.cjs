@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const {chromium} = require('/tmp/library-browser-check/node_modules/playwright');
 const sha = s => crypto.createHash('sha256').update(s).digest('hex');
+let stage='starting',audit=[];
 const pause = ms => new Promise(r=>setTimeout(r,ms));
 const base = 'https://contact-capture.matthias-homan.workers.dev';
 const backups = 'c0e7a3f504ad45c0bc3d346ba89af2a1';
@@ -21,18 +22,18 @@ async function blocks(id){let out=[],cursor='';do{const p=await notion('/blocks/
 (async()=>{
   const source=await notion('/databases/'+backups+'/query',{filter:{property:'App',title:{equals:'Library verification source 2026-11-18'}},page_size:10});
   assert.equal(source.results.length,1,'Private source must be unique');
-  const sourceBlocks=await blocks(source.results[0].id);
+  stage='reading-private-source';const sourceBlocks=await blocks(source.results[0].id);
   const packed=sourceBlocks.map(b=>(b[b.type]?.rich_text||[]).map(x=>x.plain_text??x.text?.content??'').join('')).join('');
   assert.equal(sha(packed),'3de1636ed177822f05c7a20ec24df0b594e923b600b072f3a505e4260f8ac5a8','Private source integrity failed');
   const object=JSON.parse(zlib.gunzipSync(Buffer.from(packed.slice(3),'base64')).toString());
   assert.equal(object.books.length,314);
-  const oldId='415e528f-adf8-81a7-abb0-cf24a21aa42e';
+  stage='private-source-verified';const oldId='415e528f-adf8-81a7-abb0-cf24a21aa42e';
   const oldHash=sha(JSON.stringify(await blocks(oldId)));
   const response=await fetch('https://librarymh.github.io/library-app/?verification='+Date.now());
   assert(response.ok);
   const html=await response.text();
   assert(html.includes('/backup/library-upload/'),'New application is not deployed');
-  let calls=[],drop=true;
+  stage='browser-backup';let calls=audit,drop=true;
   const server=http.createServer(async(req,res)=>{
     try{
       if(req.url==='/'){res.setHeader('Content-Type','text/html');res.end(html);return;}
@@ -53,16 +54,16 @@ async function blocks(id){let out=[],cursor='';do{const p=await notion('/blocks/
     const page=await browser.newPage({viewport:{width:390,height:844}});
     await page.goto('http://127.0.0.1:'+server.address().port);
     result=await page.evaluate(async({object,url})=>{
-      S=object; const before=JSON.stringify(S);
+      let phase='setup';try{S=object; const before=JSON.stringify(S);
       LibrarySharedBackup.setup(url,'verification-placeholder'); UI.tab='settings';render();
-      const saved=await LibrarySharedBackup.save('library',{schema:'library.v1',books:S.books});
-      const loaded=await LibrarySharedBackup.load('library');
+      phase='saving';const saved=await LibrarySharedBackup.save('library',{schema:'library.v1',books:S.books});
+      phase='loading';const loaded=await LibrarySharedBackup.load('library');
       if(JSON.stringify(loaded.object)!==JSON.stringify(object))throw Error('Full restored object differs');
-      const projection=libraryExportBooks();
-      const one=await libraryRunExport(projection),two=await libraryRunExport(projection);
-      return {books:loaded.object.books.length,takeaways:one.takeaways_unchanged,secondTakeaways:two.takeaways_unchanged,fullMatch:true,localUnchanged:JSON.stringify(S)===before,saved:!!saved};
+      phase='restoring';S={books:[]};const restored=mergeMissing(loaded.object.books);if(restored!==314||JSON.stringify(S.books)!==JSON.stringify(object.books))throw Error('Empty restore fidelity differs');if(mergeMissing(loaded.object.books)!==0)throw Error('Repeated restore adds books');const projection=libraryExportBooks();
+      phase='first-export';const one=await libraryRunExport(projection);phase='second-export';const two=await libraryRunExport(projection);
+      return {books:loaded.object.books.length,takeaways:one.takeaways_unchanged,secondTakeaways:two.takeaways_unchanged,fullMatch:true,localUnchanged:JSON.stringify(S.books)===JSON.stringify(object.books),restoredExactly:true,saved:!!saved};}catch(e){return {ok:false,phase,errorType:e.name};}
     },{object,url:'http://127.0.0.1:'+server.address().port});
-    assert(result.fullMatch&&result.localUnchanged&&result.saved);
+    stage='browser-result-'+(result.phase||'complete');assert(result.fullMatch&&result.localUnchanged&&result.saved);
     assert.equal(result.books,314);assert.equal(result.takeaways,706);assert.equal(result.secondTakeaways,706);
     assert.equal(calls.filter(x=>x.path==='/backup/library-export').length,0,'Unchanged export must send zero writes');
     assert(calls.every(x=>x.status===200),'Every forwarded request must succeed');
@@ -70,4 +71,4 @@ async function blocks(id){let out=[],cursor='';do{const p=await notion('/blocks/
     assert.equal(sha(JSON.stringify(await blocks(oldId))),oldHash,'Protected old snapshot changed');
     console.log(JSON.stringify({ok:true,...result,requests:calls.length,exportWrites:0,maxRequestBytes:Math.max(...calls.map(x=>x.bytes)),maxResponseMs:Math.max(...calls.map(x=>x.ms)),lostChunkResponseRecovered:!drop,oldBackupUnchanged:true}));
   }finally{await browser.close();server.close();}
-})().catch(()=>{console.error('Private Library verification failed. No private error details were logged.');process.exitCode=1;});
+})().catch(()=>{console.error(JSON.stringify({ok:false,stage,requests:audit.map(x=>({...x,path:x.path.split('?')[0]}))}));process.exitCode=1;});
