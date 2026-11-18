@@ -19,6 +19,8 @@ export const APP_NAMES: Record<BackupApp, string> = {
   library: "Library",
 };
 const MAX_DATA = 400_000; // characters, i.e. about 1.5 MB of text before compression; also keeps one Notion request under its size limit
+const PRESERVED_LIBRARY_BACKUP = "415e528fadf881a7abb0cf24a21aa42e";
+const protectedLibrary = (p: NotionPage) => p.id.replace(/-/g, "") === PRESERVED_LIBRARY_BACKUP;
 const KEEP = 3; // backups kept per app; older ones go to Notion's trash
 const CHUNK = 2000; // Notion's limit for one piece of text
 const PER_BLOCK = 100; // pieces of text in one block (Notion's limit)
@@ -143,7 +145,7 @@ export async function saveBackup(
     },
     children,
   });
-  for (const p of old.slice(KEEP - 1)) await notion.archivePage(p.id);
+  for (const p of old.filter(p => req.app !== "library" || !protectedLibrary(p)).slice(KEEP - 1)) await notion.archivePage(p.id);
   return {
     app: req.app,
     name: APP_NAMES[req.app],
@@ -346,22 +348,16 @@ export async function libraryUpload(
         App: { title: rt("Library") },
         "Backed up": { date: { start: new Date().toISOString() } },
       });
-    // Keep legacy snapshots unchanged. Retain the latest three verified v2 backups only.
+    // The explicitly preserved old snapshot does not count against future retention.
+    // Exact Library titles include only completed snapshots, never incomplete uploads.
     const old = await n.queryPage(db, {
       filter: { property: "App", title: { equals: "Library" } },
       sorts: [{ property: "Backed up", direction: "descending" }],
       page_size: 100,
     });
     if (old.has_more) throw Error("Backup saved; retention needs a separate review. No snapshots removed.");
-    let completed = 0;
-    for (const p of old.results) {
-      const blocks = await n.request<any>("GET", "/blocks/" + p.id + "/children?page_size=1");
-      const first = blocks.results[0];
-      const manifest = first?.type === "code" ? plain(first.code) : "";
-      if (!manifest.startsWith(prefix)) continue;
-      validate(JSON.parse(manifest.slice(prefix.length)));
-      if (++completed > KEEP) await n.archivePage(p.id);
-    }
+    for (const p of old.results.filter(p => !protectedLibrary(p)).slice(KEEP))
+      await n.archivePage(p.id);
     return {
       backup: {
         app: "library",
