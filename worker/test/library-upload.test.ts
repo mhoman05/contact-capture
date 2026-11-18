@@ -77,9 +77,10 @@ it("surfaces full rate pauses instead of retrying early for Library operations",
   expect(calls).toBe(1);
 });
 
-it("retains three completed v2 backups while protecting every legacy snapshot", async () => {
+it("retains three future completed backups while protecting the specified old snapshot", async () => {
   const f = new FakeNotion(), n = new NotionClient("test", f.fetch), db = "backup";
   await saveBackup(n, db, {app:"library", data:"raw:QUJD", device:"old"});
+  f.rows[0].id="415e528f-adf8-81a7-abb0-cf24a21aa42e";f.rows[0].created="2026-11-11T00:00:00Z";f.rows[0].edited=f.rows[0].created;
   for(let j=0;j<5;j++){
     const data="raw:"+btoa("version"+j), hash=await digest(data);
     const m={hash,length:data.length,count:1};
@@ -87,6 +88,15 @@ it("retains three completed v2 backups while protecting every legacy snapshot", 
     await libraryUpload(n,db,"part",{id:s.id,i:0,data});
     await libraryUpload(n,db,"commit",{id:s.id});
   }
+  expect(f.rows[0].archived).not.toBe(true);
+  expect(f.rows.filter(p=>!p.archived)).toHaveLength(4);
+});
+
+it("protects the old snapshot even when a legacy client saves", async()=>{
+  const f=new FakeNotion(),n=new NotionClient("test",f.fetch),db="backup";
+  await saveBackup(n,db,{app:"library",data:"raw:QUJD",device:"old"});
+  f.rows[0].id="415e528f-adf8-81a7-abb0-cf24a21aa42e";f.rows[0].created="2026-11-11T00:00:00Z";f.rows[0].edited=f.rows[0].created;
+  for(let j=0;j<5;j++)await saveBackup(n,db,{app:"library",data:"raw:QUJE",device:"legacy"});
   expect(f.rows[0].archived).not.toBe(true);
   expect(f.rows.filter(p=>!p.archived)).toHaveLength(4);
 });
