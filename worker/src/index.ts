@@ -492,7 +492,15 @@ export default {
         const text=await req.text(); if(text.length>500000) return withCors(req,json({error:'Library export is too large.'},413));
         let raw:unknown;try{raw=JSON.parse(text);}catch{return withCors(req,json({error:'Body is not valid JSON.'},400));}
         const books=parseLibrary(raw);if(typeof books==='string')return withCors(req,json({error:books},400));
-        return withCors(req,json(await exportLibrary(new NotionClient(env.NOTION_TOKEN),env.NOTION_LIBRARY_BOOKS_DB,env.NOTION_LIBRARY_TAKEAWAYS_DB,books),200));
+        // Bound this export only. Other backup and CRM operations are unchanged.
+        // The app waits longer than this deadline before retrying a lost response.
+        const deadline=Date.now()+60000;
+        const boundedNotion=new NotionClient(env.NOTION_TOKEN,(input,init)=>{
+          const remaining=deadline-Date.now();
+          if(remaining<=0)throw new Error('Library export reached its 60-second request deadline. Completed parts are kept.');
+          return fetch(input,{...init,signal:AbortSignal.timeout(Math.min(15000,remaining))});
+        });
+        return withCors(req,json(await exportLibrary(boundedNotion,env.NOTION_LIBRARY_BOOKS_DB,env.NOTION_LIBRARY_TAKEAWAYS_DB,books),200));
       }catch(err){return withCors(req,json({error:err instanceof Error?err.message:'Library export failed. Retry is safe; no entries are deleted.'},502));}
     }
     if (url.pathname.startsWith('/backup/')) return withCors(req, await handleBackup(req, env, url));
