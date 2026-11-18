@@ -492,7 +492,7 @@ export default {
       if(req.method!==(url.pathname.endsWith('/status')?'GET':'POST')) return withCors(req,json({error:'Wrong method.'},405));
       if(!env.NOTION_LIBRARY_BOOKS_DB || !env.NOTION_LIBRARY_TAKEAWAYS_DB) return withCors(req,json({error:'Library export destinations are not configured.'},503));
       try {
-        if(url.pathname.endsWith('/status'))return withCors(req,json(await libraryStatus(new NotionClient(env.NOTION_TOKEN,undefined,true),env.NOTION_LIBRARY_BOOKS_DB,env.NOTION_LIBRARY_TAKEAWAYS_DB,url.searchParams.get('kind')??'',url.searchParams.get('cursor')??undefined),200));
+        if(url.pathname.endsWith('/status'))return withCors(req,json(await libraryStatus(new NotionClient(env.NOTION_TOKEN,(input,init)=>fetch(input,{...init,signal:AbortSignal.timeout(15000)}),true),env.NOTION_LIBRARY_BOOKS_DB,env.NOTION_LIBRARY_TAKEAWAYS_DB,url.searchParams.get('kind')??'',url.searchParams.get('cursor')??undefined),200));
         const text=await req.text(); if(text.length>500000) return withCors(req,json({error:'Library export is too large.'},413));
         let raw:unknown;try{raw=JSON.parse(text);}catch{return withCors(req,json({error:'Body is not valid JSON.'},400));}
         const books=parseLibrary(raw);if(typeof books==='string')return withCors(req,json({error:books},400));
