@@ -33,6 +33,7 @@ export class FakeNotion {
     }
     if (filter.status) return (prop?.status?.name ?? 'Not started') !== filter.status.does_not_equal;
     if (filter.relation) return (prop?.relation ?? []).some((r: any) => r.id === filter.relation.contains);
+    if(filter.rich_text){const text=(prop?.rich_text??[]).map((x:any)=>x.plain_text??x.text.content).join('');return filter.rich_text.equals!==undefined?text===filter.rich_text.equals:filter.rich_text.is_not_empty?!!text:!text;}
     if (filter.email) return (prop?.email ?? null) === filter.email.equals;
     if (filter.url) return (prop?.url ?? '').includes(filter.url.contains);
     if (filter.title) {
@@ -53,6 +54,7 @@ export class FakeNotion {
     let m = url.pathname.match(/^\/v1\/databases\/([^/]+)\/query$/);
     if (m && method === 'POST') {
       let all = this.rows.filter((r) => r.db === m![1] && !r.archived && this.matches(r, body.filter));
+      if(body.sorts?.[0]?.property==='Backed up')all=[...all].sort((a,b)=>(b.properties['Backed up']?.date?.start??'').localeCompare(a.properties['Backed up']?.date?.start??''));
       if (['created_time', 'last_edited_time'].includes(body.sorts?.[0]?.timestamp) && body.sorts[0].direction === 'descending') all = [...all].reverse();
       const start = body.start_cursor ? Number(body.start_cursor) : 0;
       const size = body.page_size ?? 100;
@@ -67,6 +69,7 @@ export class FakeNotion {
       return ok(this.page(row));
     }
     m = url.pathname.match(/^\/v1\/blocks\/([^/]+)\/children$/);
+    if(m&&method==='PATCH'){const row=this.rows.find(r=>r.id===m![1]);if(!row)return new Response('not found',{status:404});row.children??=[];row.children.push(...body.children);return ok({results:body.children});}
     if (m && method === 'GET') {
       const all = this.rows.find((r) => r.id === m![1])?.children ?? [];
       const start = Number(url.searchParams.get('start_cursor') ?? '0');

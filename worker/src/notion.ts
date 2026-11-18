@@ -6,6 +6,7 @@ export class NotionError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly retryAfter?: number,
   ) {
     super(message);
   }
@@ -28,6 +29,7 @@ export class NotionClient {
     // Wrapped in an arrow function on purpose: Cloudflare Workers throw "Illegal invocation" if the global fetch is
     // stored on an object and called as a method (this.fetchImpl(...)).
     private readonly fetchImpl: typeof fetch = (input, init) => fetch(input, init),
+    private readonly deferRateLimits=false,
   ) {}
 
   async request<T>(method: 'GET' | 'POST' | 'PATCH', path: string, body?: unknown, attempt = 0): Promise<T> {
@@ -40,6 +42,7 @@ export class NotionClient {
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
+    if(this.deferRateLimits&&(res.status===429||res.status===529)){const raw=Number(res.headers.get('retry-after')??'60');throw new NotionError('Notion is busy. Retry after the requested pause.',429,Number.isFinite(raw)?Math.max(1,raw):60);}
     if (res.status === 429 && attempt < 2) {
       const wait = Math.min(Number(res.headers.get('retry-after') ?? '1'), 5) * 1000;
       await new Promise((r) => setTimeout(r, wait));

@@ -13,7 +13,7 @@ import { addMeetingNotes, isDay, listMeetings } from './meetings';
 import { GoogleError, parseGoogleContact, saveToGoogle } from './google';
 import { createEvent, getEvent, listEvents, parseNewEvent } from './events';
 import { readMe, updateMeValue } from './me';
-import { isApp, listBackups, loadBackup, parseSave, saveBackup } from './backup';
+import { libraryStatus, libraryUpload, isApp, listBackups, loadBackup, parseSave, saveBackup } from './backup';
 import { deletePerson, findDuplicates, listPeople, mergePeople, parsePatch, personHistory, updatePersonFields } from './people';
 import { NotionClient, NotionError, pageTitle, plain } from './notion';
 import { cleanEmail, cleanLinkedInLink, cleanPhone, cleanTelegram, cleanWebsite, nonEmpty } from './normalize';
@@ -443,14 +443,16 @@ function withCors(req: Request, res: Response): Response {
 const BACKUP_BODY_MAX = 500_000;
 async function handleBackup(req: Request, env: Env, url: URL): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204 });
-  const want = url.pathname === '/backup/save' ? 'POST' : 'GET';
-  if (!['/backup/save', '/backup/load', '/backup/list'].includes(url.pathname)) return json({ error: 'Not found.' }, 404);
+  const upload=/^\/backup\/library-upload\/(start|part|commit)$/.exec(url.pathname);
+  const want = url.pathname === '/backup/save'||upload ? 'POST' : 'GET';
+  if (!upload&&!['/backup/save', '/backup/load', '/backup/list'].includes(url.pathname)) return json({ error: 'Not found.' }, 404);
   if (req.method !== want) return json({ error: `Use ${want}.` }, 405);
   const auth = req.headers.get('Authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!env.CAPTURE_TOKEN || !token || !(await secretsMatch(token, env.CAPTURE_TOKEN))) return json({ error: 'Wrong or missing access token.' }, 401);
   if (!env.NOTION_BACKUPS_DB) return json({ error: 'NOTION_BACKUPS_DB is not set.' }, 503);
-  const notion = new NotionClient(env.NOTION_TOKEN);
+  const uploadDeadline=Date.now()+60000;
+  const notion = new NotionClient(env.NOTION_TOKEN,upload?((input,init)=>{const left=uploadDeadline-Date.now();if(left<=0)throw Error('Backup request paused at its time limit. Previous backups remain available.');return fetch(input,{...init,signal:AbortSignal.timeout(Math.min(15000,left))});}):undefined,!!upload);
   try {
     if (url.pathname === '/backup/list') return json({ backups: await listBackups(notion, env.NOTION_BACKUPS_DB) }, 200);
     if (url.pathname === '/backup/load') {
@@ -467,6 +469,7 @@ async function handleBackup(req: Request, env: Env, url: URL): Promise<Response>
     } catch {
       return json({ error: 'Body is not valid JSON.' }, 400);
     }
+    if(upload){try{return json(await libraryUpload(notion,env.NOTION_BACKUPS_DB,upload[1],body),200);}catch(e){const retry=e instanceof NotionError?e.retryAfter:undefined;return json({error:e instanceof Error?e.message:'Backup upload failed.',...(retry?{retry_after:retry}:{})},retry?429:502);}}
     const parsed = parseSave(body);
     if (typeof parsed === 'string') return json({ error: parsed }, 400);
     return json({ backup: await saveBackup(notion, env.NOTION_BACKUPS_DB, parsed) }, 200);
@@ -482,13 +485,14 @@ export default {
     const url = new URL(req.url);
 
     if (url.pathname === '/health') return json({ ok: true }, 200);
-    if (url.pathname === '/backup/library-export') {
+    if (url.pathname === '/backup/library-export'||url.pathname==='/backup/library-export/status') {
       if (req.method === 'OPTIONS') return withCors(req, new Response(null,{status:204}));
       const auth=req.headers.get('Authorization')??'';
       if(!env.CAPTURE_TOKEN || !auth.startsWith('Bearer ') || !(await secretsMatch(auth.slice(7),env.CAPTURE_TOKEN))) return withCors(req,json({error:'Wrong or missing access token.'},401));
-      if(req.method!=='POST') return withCors(req,json({error:'Use POST.'},405));
+      if(req.method!==(url.pathname.endsWith('/status')?'GET':'POST')) return withCors(req,json({error:'Wrong method.'},405));
       if(!env.NOTION_LIBRARY_BOOKS_DB || !env.NOTION_LIBRARY_TAKEAWAYS_DB) return withCors(req,json({error:'Library export destinations are not configured.'},503));
       try {
+        if(url.pathname.endsWith('/status'))return withCors(req,json(await libraryStatus(new NotionClient(env.NOTION_TOKEN,(input,init)=>fetch(input,{...init,signal:AbortSignal.timeout(15000)}),true),env.NOTION_LIBRARY_BOOKS_DB,env.NOTION_LIBRARY_TAKEAWAYS_DB,url.searchParams.get('kind')??'',url.searchParams.get('cursor')??undefined),200));
         const text=await req.text(); if(text.length>500000) return withCors(req,json({error:'Library export is too large.'},413));
         let raw:unknown;try{raw=JSON.parse(text);}catch{return withCors(req,json({error:'Body is not valid JSON.'},400));}
         const books=parseLibrary(raw);if(typeof books==='string')return withCors(req,json({error:books},400));
@@ -499,9 +503,9 @@ export default {
           const remaining=deadline-Date.now();
           if(remaining<=0)throw new Error('Library export reached its 60-second request deadline. Completed parts are kept.');
           return fetch(input,{...init,signal:AbortSignal.timeout(Math.min(15000,remaining))});
-        });
+        },true);
         return withCors(req,json(await exportLibrary(boundedNotion,env.NOTION_LIBRARY_BOOKS_DB,env.NOTION_LIBRARY_TAKEAWAYS_DB,books),200));
-      }catch(err){return withCors(req,json({error:err instanceof Error?err.message:'Library export failed. Retry is safe; no entries are deleted.'},502));}
+      }catch(err){const retry=err instanceof NotionError?err.retryAfter:undefined;const r=json({error:err instanceof Error?err.message:'Library export failed.',...(retry?{retry_after:retry}:{})},retry?429:502);if(retry)r.headers.set('Retry-After',String(retry));return withCors(req,r);}
     }
     if (url.pathname.startsWith('/backup/')) return withCors(req, await handleBackup(req, env, url));
     // Android posts shared files here; the app's service worker normally intercepts it. If it is not active yet, just open the app.
