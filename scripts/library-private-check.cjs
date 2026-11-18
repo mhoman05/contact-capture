@@ -27,7 +27,7 @@ async function blocks(id){let out=[],cursor='';do{const p=await notion('/blocks/
   assert.equal(sha(packed),'3de1636ed177822f05c7a20ec24df0b594e923b600b072f3a505e4260f8ac5a8','Private source integrity failed');
   const object=JSON.parse(zlib.gunzipSync(Buffer.from(packed.slice(3),'base64')).toString());
   assert.equal(object.books.length,314);
-  stage='private-source-verified';const oldId='415e528f-adf8-81a7-abb0-cf24a21aa42e';
+  stage='private-source-verified';const cursorProbe=await notion('/databases/41ce528fadf881bcab50cfd5b8a27903/query',{page_size:100});console.log(JSON.stringify({opaqueCursorLength:cursorProbe.next_cursor?.length||0,oldCursorRestrictionWouldReject:!!cursorProbe.next_cursor&&!/^[a-zA-Z0-9-]{1,100}$/.test(cursorProbe.next_cursor)}));const oldId='415e528f-adf8-81a7-abb0-cf24a21aa42e';
   const oldHash=sha(JSON.stringify(await blocks(oldId)));
   const response=await fetch('https://librarymh.github.io/library-app/?verification='+Date.now());
   assert(response.ok);
@@ -42,7 +42,7 @@ async function blocks(id){let out=[],cursor='';do{const p=await notion('/blocks/
       const t=Date.now();
       const r=await fetch(base+req.url,{method:req.method,headers:{Authorization:'Bearer '+process.env.CAPTURE_TOKEN,'Content-Type':'application/json',Origin:'https://librarymh.github.io'},...(text?{body:text}:{}),signal:AbortSignal.timeout(95000)});
       const body=await r.text();
-      calls.push({path:req.url,method:req.method,bytes:Buffer.byteLength(text),status:r.status,ms:Date.now()-t});
+      let errorCode='';if(!r.ok){try{const e=JSON.parse(body).error;errorCode=e==='Invalid status cursor.'?'invalid-cursor':e?.startsWith('Notion error 400:')?'notion-400':e?.startsWith('Notion cannot see')?'notion-permission':'other';}catch{errorCode='unreadable';}}calls.push({path:req.url,method:req.method,bytes:Buffer.byteLength(text),status:r.status,ms:Date.now()-t,...(errorCode?{errorCode}:{})});
       if(req.url.endsWith('/part')&&drop&&r.ok&&JSON.parse(text).i===3){drop=false;req.socket.destroy();return;}
       res.writeHead(r.status,{'Content-Type':'application/json',...(r.headers.get('Retry-After')?{'Retry-After':r.headers.get('Retry-After')}:{})});res.end(body);
     }catch{res.writeHead(502);res.end('{"error":"Verification proxy request failed"}');}
