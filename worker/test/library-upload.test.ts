@@ -76,3 +76,17 @@ it("surfaces full rate pauses instead of retrying early for Library operations",
   });
   expect(calls).toBe(1);
 });
+
+it("retains three completed v2 backups while protecting every legacy snapshot", async () => {
+  const f = new FakeNotion(), n = new NotionClient("test", f.fetch), db = "backup";
+  await saveBackup(n, db, {app:"library", data:"raw:QUJD", device:"old"});
+  for(let j=0;j<5;j++){
+    const data="raw:"+btoa("version"+j), hash=await digest(data);
+    const m={hash,length:data.length,count:1};
+    const s:any=await libraryUpload(n,db,"start",m);
+    await libraryUpload(n,db,"part",{id:s.id,i:0,data});
+    await libraryUpload(n,db,"commit",{id:s.id});
+  }
+  expect(f.rows[0].archived).not.toBe(true);
+  expect(f.rows.filter(p=>!p.archived)).toHaveLength(4);
+});
