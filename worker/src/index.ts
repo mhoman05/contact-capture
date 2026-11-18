@@ -1,3 +1,4 @@
+import type { NotionPage } from './notion';
 import Anthropic from '@anthropic-ai/sdk';
 import { runCapture } from './capture';
 import { DEFAULT_MODEL, ExtractionError, extractContacts } from './extract';
@@ -14,7 +15,7 @@ import { createEvent, getEvent, listEvents, parseNewEvent } from './events';
 import { readMe, updateMeValue } from './me';
 import { isApp, listBackups, loadBackup, parseSave, saveBackup } from './backup';
 import { deletePerson, findDuplicates, listPeople, mergePeople, parsePatch, personHistory, updatePersonFields } from './people';
-import { NotionClient, NotionError, pageTitle } from './notion';
+import { NotionClient, NotionError, pageTitle, plain } from './notion';
 import { cleanEmail, cleanLinkedInLink, cleanPhone, cleanTelegram, cleanWebsite, nonEmpty } from './normalize';
 import type { CaptureImage, CaptureRequest, Env, ManualContact } from './types';
 
@@ -481,6 +482,19 @@ export default {
     const url = new URL(req.url);
 
     if (url.pathname === '/health') return json({ ok: true }, 200);
+    if (url.pathname === '/backup/library-export') {
+      if (req.method === 'OPTIONS') return withCors(req, new Response(null,{status:204}));
+      const auth=req.headers.get('Authorization')??'';
+      if(!env.CAPTURE_TOKEN || !auth.startsWith('Bearer ') || !(await secretsMatch(auth.slice(7),env.CAPTURE_TOKEN))) return withCors(req,json({error:'Wrong or missing access token.'},401));
+      if(req.method!=='POST') return withCors(req,json({error:'Use POST.'},405));
+      if(!env.NOTION_LIBRARY_BOOKS_DB || !env.NOTION_LIBRARY_TAKEAWAYS_DB) return withCors(req,json({error:'Library export destinations are not configured.'},503));
+      try {
+        const text=await req.text(); if(text.length>500000) return withCors(req,json({error:'Library export is too large.'},413));
+        let raw:unknown;try{raw=JSON.parse(text);}catch{return withCors(req,json({error:'Body is not valid JSON.'},400));}
+        const books=parseLibrary(raw);if(typeof books==='string')return withCors(req,json({error:books},400));
+        return withCors(req,json(await exportLibrary(new NotionClient(env.NOTION_TOKEN),env.NOTION_LIBRARY_BOOKS_DB,env.NOTION_LIBRARY_TAKEAWAYS_DB,books),200));
+      }catch(err){return withCors(req,json({error:err instanceof Error?err.message:'Library export failed. Retry is safe; no entries are deleted.'},502));}
+    }
     if (url.pathname.startsWith('/backup/')) return withCors(req, await handleBackup(req, env, url));
     // Android posts shared files here; the app's service worker normally intercepts it. If it is not active yet, just open the app.
     if (url.pathname === '/share-target') return Response.redirect(new URL('/', url).href, 303);
@@ -561,3 +575,64 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+
+
+// One-way, non-deleting export. Personal notes, actions and topics in Notion are never written.
+export interface LibraryBook { id: string; title: string; author: string; formats: string[]; status: string; notes: string; ideas: { key: string; text: string }[] }
+export function parseLibrary(raw: unknown): LibraryBook[] | string {
+  const books = (raw as any)?.books;
+  if (!Array.isArray(books) || books.length > 200) return 'Send up to 200 books.';
+  const ids = new Set<string>();
+  const out: LibraryBook[] = [];
+  for (const b of books) {
+    if (!b || typeof b.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(b.id) || ids.has(b.id)) return 'Book IDs must be unique and valid.';
+    if (typeof b.title !== 'string' || !b.title.trim() || b.title.length > 1000) return 'Each book needs a title of up to 1000 characters.';
+    if (typeof b.author !== 'string' || b.author.length > 1000 || typeof b.notes !== 'string' || b.notes.length > 20000) return 'Author or app notes are too long.';
+    if (!Array.isArray(b.formats) || b.formats.some((f: unknown) => !['ebook','audio','print'].includes(String(f)))) return 'Invalid format.';
+    if (!['','Reading','Finished'].includes(b.status)) return 'Invalid reading status.';
+    if (!Array.isArray(b.ideas) || b.ideas.length > 100) return 'Too many takeaways.';
+    const keys = new Set<string>();
+    for (const idea of b.ideas) {
+      if (!idea || typeof idea.key !== 'string' || !/^[a-zA-Z0-9_.:-]{1,180}$/.test(idea.key) || keys.has(idea.key) || typeof idea.text !== 'string' || !idea.text.trim() || idea.text.length > 10000) return 'Invalid takeaway.';
+      keys.add(idea.key);
+    }
+    ids.add(b.id); out.push(b);
+  }
+  return out;
+}
+const rich = (s: string) => ({ rich_text: Array.from({length: Math.ceil(s.length / 1900)}, (_,i) => ({ type: 'text', text: { content: s.slice(i*1900,(i+1)*1900) } })) });
+const title = (s: string) => ({ title: [{ type:'text', text:{content:s.slice(0,1000)} }] });
+const same = (a: string, b: string) => a.replace(/-/g,'') === b.replace(/-/g,'');
+function bookId(p: NotionPage) { return plain(p.properties['Library ID']); }
+export async function exportLibrary(notion: NotionClient, booksDb: string, ideasDb: string, books: LibraryBook[]) {
+  // Validate both destinations before doing any writes.
+  const [bd, td] = await Promise.all([notion.getDatabase(booksDb), notion.getDatabase(ideasDb)]);
+  for (const k of ['Name','Author','Library ID','Library link','Format','Status','App notes']) if (!bd.properties[k]) throw new Error('Books schema is missing '+k+'.');
+  for (const k of ['Name','Book','Idea','Source','Source key','Library link']) if (!td.properties[k]) throw new Error('Takeaways schema is missing '+k+'.');
+  const oldBooks = await notion.queryAll(booksDb,1000), oldIdeas = await notion.queryAll(ideasDb,5000);
+  const counts = { books_created:0, books_updated:0, books_unchanged:0, takeaways_created:0, takeaways_updated:0, takeaways_unchanged:0 };
+  for (const b of books) {
+    const matches = oldBooks.filter(p=>bookId(p)===b.id);
+    if (matches.length>1) throw new Error('Duplicate Library ID in Notion. No automatic merge was attempted.');
+    const link = 'https://librarymh.github.io/library-app/#book='+b.id;
+    const props = { Name:title(b.title), Author:rich(b.author), 'Library ID':rich(b.id), 'Library link':{url:link}, Format:{multi_select:b.formats.map(name=>({name}))}, Status:{select:b.status?{name:b.status}:null}, 'App notes':rich(b.notes) };
+    let page = matches[0];
+    if (page) {
+      const p=page.properties;const unchanged=plain(p.Name)===b.title && plain(p.Author)===b.author && p['Library link']?.url===link && plain(p['App notes'])===b.notes && (p.Status?.select?.name??'')===b.status && JSON.stringify((p.Format?.multi_select??[]).map((f:any)=>f.name).sort())===JSON.stringify([...b.formats].sort());
+      if(unchanged)counts.books_unchanged++;else{await notion.updatePage(page.id,props);counts.books_updated++;}
+    }
+    else { page=await notion.createPage(booksDb,props); oldBooks.push(page); counts.books_created++; }
+    for (const idea of b.ideas) {
+      const exact=oldIdeas.filter(p=>plain(p.properties['Source key'])===idea.key);
+      // Adopt the initial imported row by book and exact idea, without replacing personal fields.
+      const legacy=exact.length?exact:oldIdeas.filter(p=>!plain(p.properties['Source key']) && plain(p.properties.Source)==='Supplied guide' && plain(p.properties.Idea)===idea.text && (p.properties.Book?.relation??[]).some((r:any)=>same(r.id,page.id)));
+      // Source is a select, so use its name for the initial imported rows too.
+      const candidates=legacy.length?legacy:oldIdeas.filter(p=>!plain(p.properties['Source key']) && p.properties.Source?.select?.name==='Supplied guide' && plain(p.properties.Idea)===idea.text && (p.properties.Book?.relation??[]).some((r:any)=>same(r.id,page.id)));
+      if(candidates.length>1) throw new Error('Duplicate takeaway in Notion. No automatic merge was attempted.');
+      const ip={Name:title(idea.text), Book:{relation:[{id:page.id}]}, Idea:rich(idea.text), Source:{select:{name:'Supplied guide'}}, 'Source key':rich(idea.key), 'Library link':{url:link}};
+      if(candidates[0]) {const p=candidates[0].properties;if(plain(p['Source key'])===idea.key && plain(p.Idea)===idea.text && plain(p.Name)===idea.text.slice(0,1000) && p.Source?.select?.name==='Supplied guide' && p['Library link']?.url===link)counts.takeaways_unchanged++;else{await notion.updatePage(candidates[0].id,ip);counts.takeaways_updated++;}}
+      else {oldIdeas.push(await notion.createPage(ideasDb,ip));counts.takeaways_created++;}
+    }
+  }
+  return counts;
+          }
