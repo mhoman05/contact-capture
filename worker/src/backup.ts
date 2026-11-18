@@ -346,7 +346,22 @@ export async function libraryUpload(
         App: { title: rt("Library") },
         "Backed up": { date: { start: new Date().toISOString() } },
       });
-    // Preserve every previous Library backup. This repair never removes user data.
+    // Keep legacy snapshots unchanged. Retain the latest three verified v2 backups only.
+    const old = await n.queryPage(db, {
+      filter: { property: "App", title: { equals: "Library" } },
+      sorts: [{ property: "Backed up", direction: "descending" }],
+      page_size: 100,
+    });
+    if (old.has_more) throw Error("Backup saved; retention needs a separate review. No snapshots removed.");
+    let completed = 0;
+    for (const p of old.results) {
+      const blocks = await n.request<any>("GET", "/blocks/" + p.id + "/children?page_size=1");
+      const first = blocks.results[0];
+      const manifest = first?.type === "code" ? plain(first.code) : "";
+      if (!manifest.startsWith(prefix)) continue;
+      validate(JSON.parse(manifest.slice(prefix.length)));
+      if (++completed > KEEP) await n.archivePage(p.id);
+    }
     return {
       backup: {
         app: "library",
