@@ -417,7 +417,7 @@ export async function libraryStatus(
   cursor?: string,
 ) {
   if (!["books", "ideas"].includes(kind)) throw Error("Invalid status kind.");
-  if (cursor && !/^[a-zA-Z0-9-]{1,100}$/.test(cursor))
+  if (cursor && (cursor.length > 2048 || /[\u0000-\u001f]/.test(cursor)))
     throw Error("Invalid status cursor.");
   const r = await n.queryPage(kind === "books" ? booksDb : ideasDb, {
     page_size: 100,
