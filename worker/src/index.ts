@@ -581,7 +581,7 @@ export default {
 export interface LibraryBook { id: string; title: string; author: string; formats: string[]; status: string; notes: string; ideas: { key: string; text: string }[] }
 export function parseLibrary(raw: unknown): LibraryBook[] | string {
   const books = (raw as any)?.books;
-  if (!Array.isArray(books) || books.length > 200) return 'Send up to 200 books.';
+  if (!Array.isArray(books) || books.length !== 1) return 'Refresh Library while online, then retry the export. Send one book per request.';
   const ids = new Set<string>();
   const out: LibraryBook[] = [];
   for (const b of books) {
@@ -590,7 +590,7 @@ export function parseLibrary(raw: unknown): LibraryBook[] | string {
     if (typeof b.author !== 'string' || b.author.length > 1000 || typeof b.notes !== 'string' || b.notes.length > 20000) return 'Author or app notes are too long.';
     if (!Array.isArray(b.formats) || b.formats.some((f: unknown) => !['ebook','audio','print'].includes(String(f)))) return 'Invalid format.';
     if (!['','Reading','Finished'].includes(b.status)) return 'Invalid reading status.';
-    if (!Array.isArray(b.ideas) || b.ideas.length > 100) return 'Too many takeaways.';
+    if (!Array.isArray(b.ideas) || b.ideas.length > 5) return 'Refresh Library while online, then retry the export. Send at most five takeaways per request.';
     const keys = new Set<string>();
     for (const idea of b.ideas) {
       if (!idea || typeof idea.key !== 'string' || !/^[a-zA-Z0-9_.:-]{1,180}$/.test(idea.key) || keys.has(idea.key) || typeof idea.text !== 'string' || !idea.text.trim() || idea.text.length > 10000) return 'Invalid takeaway.';
@@ -605,11 +605,31 @@ const title = (s: string) => ({ title: [{ type:'text', text:{content:s.slice(0,1
 const same = (a: string, b: string) => a.replace(/-/g,'') === b.replace(/-/g,'');
 function bookId(p: NotionPage) { return plain(p.properties['Library ID']); }
 export async function exportLibrary(notion: NotionClient, booksDb: string, ideasDb: string, books: LibraryBook[]) {
+  // Defend the request budget even when called outside the HTTP parser.
+  const checked = parseLibrary({ books }); if (typeof checked === 'string') throw new Error(checked);
   // Validate both destinations before doing any writes.
   const [bd, td] = await Promise.all([notion.getDatabase(booksDb), notion.getDatabase(ideasDb)]);
   for (const k of ['Name','Author','Library ID','Library link','Format','Status','App notes']) if (!bd.properties[k]) throw new Error('Books schema is missing '+k+'.');
   for (const k of ['Name','Book','Idea','Source','Source key','Library link']) if (!td.properties[k]) throw new Error('Takeaways schema is missing '+k+'.');
-  const oldBooks = await notion.queryAll(booksDb,1000), oldIdeas = await notion.queryAll(ideasDb,5000);
+  // Scope lookups to this book and these source keys, never scan entire collections.
+  // Complete all pagination before writes, and cap it so even all 429 retries stay below 50 fetches.
+  async function lookup(db: string, filter: unknown) {
+    const rows: NotionPage[] = []; let cursor: string | undefined;
+    for (let n = 0; n < 4; n++) {
+      const page = await notion.queryPage(db, { filter, page_size:100, ...(cursor ? { start_cursor:cursor } : {}) });
+      rows.push(...page.results);
+      if (!page.has_more) return rows;
+      if (!page.next_cursor) throw new Error('Incomplete Notion lookup. No changes made by this request.');
+      cursor = page.next_cursor;
+    }
+    throw new Error('Too many matching Notion rows. No changes made by this request.');
+  }
+  const incoming = books[0];
+  const oldBooks = await lookup(booksDb, {property:'Library ID',rich_text:{equals:incoming.id}});
+  if (oldBooks.length > 1) throw new Error('Duplicate Library ID in Notion. No automatic merge was attempted.');
+  const clauses:any[] = incoming.ideas.map(i=>({property:'Source key',rich_text:{equals:i.key}}));
+  if (oldBooks[0] && incoming.ideas.length) clauses.push({and:[{property:'Book',relation:{contains:oldBooks[0].id}},{property:'Source',select:{equals:'Supplied guide'}},{property:'Source key',rich_text:{is_empty:true}}]});
+  const oldIdeas = clauses.length ? await lookup(ideasDb, clauses.length===1?clauses[0]:{or:clauses}) : [];
   const counts = { books_created:0, books_updated:0, books_unchanged:0, takeaways_created:0, takeaways_updated:0, takeaways_unchanged:0 };
   for (const b of books) {
     const matches = oldBooks.filter(p=>bookId(p)===b.id);
@@ -635,4 +655,4 @@ export async function exportLibrary(notion: NotionClient, booksDb: string, ideas
     }
   }
   return counts;
-          }
+}
