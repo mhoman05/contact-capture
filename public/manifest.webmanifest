@@ -11,15 +11,22 @@
   "theme_color": "#1f6f5c",
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "/1-icon-w05-20261121-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
-      "src": "/icon-512.png",
+      "src": "/2-icon-w05-20261121-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/3-icon-w05-20261121-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "share_target": {
@@ -47,7 +54,7 @@
       "url": "/?tab=tasks",
       "icons": [
         {
-          "src": "/icon-192.png",
+          "src": "/1-icon-w05-20261121-192.png",
           "sizes": "192x192",
           "type": "image/png"
         }
@@ -59,7 +66,7 @@
       "url": "/?tab=recent",
       "icons": [
         {
-          "src": "/icon-192.png",
+          "src": "/1-icon-w05-20261121-192.png",
           "sizes": "192x192",
           "type": "image/png"
         }
@@ -71,7 +78,7 @@
       "url": "/?tab=qr",
       "icons": [
         {
-          "src": "/icon-192.png",
+          "src": "/1-icon-w05-20261121-192.png",
           "sizes": "192x192",
           "type": "image/png"
         }
