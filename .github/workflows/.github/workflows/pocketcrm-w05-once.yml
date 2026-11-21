@@ -1,0 +1,116 @@
+name: Publish approved W05 icon once
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pocketcrm-w05-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify and publish approved icon assets only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          cat > "$RUNNER_TEMP/publish-w05.mjs" <<'W05SCRIPT'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+          import {execFileSync} from 'node:child_process';
+          import assert from 'node:assert/strict';
+          const ACCOUNT='37539811426b10849691acf1bdc48dbb';
+          const WORKER='contact-capture';
+          const EXPECTED='efa19085-e998-4f95-a8ed-2b63d163a76e';
+          const CODE_HASH='5e70f6ff10b7ce7ba4fdde2247aa12c6cdef938cc5dfa27bfea69922fd3bf6df';
+          const SOURCE='4816b739fc1e69dd41a8d5a4b29493364d55df2c';
+          const PUBLIC='https://contact-capture.matthias-homan.workers.dev';
+          const API=`https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}`;
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          assert(token,'Missing existing deployment credential');
+          const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
+          const canon=x=>JSON.stringify(sort(x));
+          function sort(x){if(Array.isArray(x))return x.map(sort);if(x&&typeof x==='object')return Object.fromEntries(Object.keys(x).sort().map(k=>[k,sort(x[k])]));return x;}
+          async function api(path,method='GET',body,auth=token){
+           const headers={Authorization:`Bearer ${auth}`};
+           if(body && !(body instanceof FormData)){headers['Content-Type']='application/json';body=JSON.stringify(body);}
+           const r=await fetch(API+path,{method,headers,body,signal:AbortSignal.timeout(60000)});
+           const j=await r.json();
+           if(!r.ok||!j.success){throw new Error(`Cloudflare ${method} ${path.split('?')[0]} failed HTTP ${r.status}, codes ${(j.errors||[]).map(e=>e.code).join(',')}`);}
+           return j.result;
+          }
+          const dp=`/workers/scripts/${WORKER}/deployments`;
+          const vp=`/workers/workers/${WORKER}/versions`;
+          async function active(){const d=await api(dp);const v=d.deployments[0].versions;assert.equal(v.length,1,'Multiple live versions');assert.equal(v[0].percentage,100);return v[0].version_id;}
+          async function version(id){return api(`${vp}/${id}?include=modules`);}
+          function stable(v){const keys=['main_module','modules','compatibility_date','compatibility_flags','usage_model','limits','placement','exports','package_dependencies'];const r={};for(const k of keys)if(v[k]!==undefined)r[k]=v[k];r.assets={config:v.assets.config};r.bindings=v.bindings.map(b=>b.type==='secret_text'?{name:b.name,type:b.type}:b).sort((a,b)=>a.name.localeCompare(b.name));return r;}
+          async function bytes(url){const r=await fetch(url,{signal:AbortSignal.timeout(30000)});assert.equal(r.status,200,`Asset HTTP error: ${new URL(url).pathname}`);return Buffer.from(await r.arrayBuffer());}
+          function git(...args){return execFileSync('git',args,{maxBuffer:5000000});}
+          function noicons(x){if(Array.isArray(x))return x.map(noicons);if(x&&typeof x==='object')return Object.fromEntries(Object.entries(x).filter(([k])=>k!=='icons').map(([k,v])=>[k,noicons(v)]));return x;}
+          let switched=false, created;
+          try{
+           assert.equal(await active(),EXPECTED,'Active version changed; stop for fresh assessment');
+           const old=await version(EXPECTED);
+           assert.equal(old.modules.length,1);
+           assert.equal(hash(Buffer.from(old.modules[0].content_base64,'base64')),CODE_HASH,'Active code changed');
+           const globalBefore=await api(`/workers/workers/${WORKER}`);
+           const globalStable=w=>Object.fromEntries(['logpush','observability','tags','tail_consumers','subdomain','references'].map(k=>[k,w[k]]));
+           const oldPaths=git('ls-tree','-r','--name-only',SOURCE,'public').toString().trim().split('\n');
+           assert.equal(oldPaths.length,22,'Producing deployment inventory changed');
+           const newPaths=fs.readdirSync('public').map(n=>'public/'+n).sort();
+           const newIcons=['public/1-icon-w05-20261121-192.png','public/2-icon-w05-20261121-512.png','public/3-icon-w05-20261121-maskable-512.png'];
+           assert.deepEqual(newPaths,[...oldPaths,...newIcons].sort(),'Unexpected asset paths');
+           const oldManifest=JSON.parse(git('show',SOURCE+':public/manifest.webmanifest'));
+           const newManifest=JSON.parse(fs.readFileSync('public/manifest.webmanifest'));
+           assert.equal(canon(noicons(oldManifest)),canon(noicons(newManifest)),'Non-icon metadata changed');
+           assert.equal(newManifest.name,'Pocket CRM');assert.equal(newManifest.short_name,'Pocket CRM');
+           for(const p of oldPaths){
+            const base=git('show',SOURCE+':'+p);
+            assert.equal(hash(await bytes(PUBLIC+'/'+p.slice(7))),hash(base),'Live asset differs from producing source: '+p);
+            if(p!=='public/manifest.webmanifest')assert.equal(hash(fs.readFileSync(p)),hash(base),'Unapproved local asset change');
+           }
+           console.log('Preflight passed: active backend hash, all22 existing assets and app identity verified');
+           const manifest={},byHash=new Map();
+           for(const p of newPaths){const b=fs.readFileSync(p),ext=p.split('.').pop(),h=hash(b.toString('base64')+ext).slice(0,32);manifest['/'+p.slice(7)]={hash:h,size:b.length};byHash.set(h,{b,p});}
+           const session=await api(`/workers/scripts/${WORKER}/assets-upload-session`,'POST',{manifest});
+           let jwt=session.jwt;assert(jwt);assert(Array.isArray(session.buckets));
+           for(const bucket of session.buckets){const form=new FormData();for(const h of bucket){const x=byHash.get(h);assert(x);const type=x.p.endsWith('.png')?'image/png':x.p.endsWith('.js')?'application/javascript':x.p.endsWith('.html')?'text/html':x.p.endsWith('.svg')?'image/svg+xml':x.p.endsWith('.webmanifest')?'application/manifest+json':'application/octet-stream';form.append(h,new Blob([x.b.toString('base64')],{type}),h);}
+            const done=await api('/workers/assets/upload?base64=true','POST',form,session.jwt);if(done.jwt)jwt=done.jwt;
+           }
+           const payload={};for(const k of ['main_module','modules','compatibility_date','compatibility_flags','usage_model','limits','placement','exports','package_dependencies'])if(old[k]!==undefined)payload[k]=old[k];
+           payload.bindings=old.bindings.map(b=>b.type==='secret_text'?{name:b.name,type:'inherit',version_id:EXPECTED}:b);
+           payload.assets={config:old.assets.config,jwt};
+           payload.annotations={'workers/message':'User-approved W05 Android icon only; exact active backend and bindings retained'};
+           assert.equal(await active(),EXPECTED,'Concurrent deployment before version creation');
+           const made=await api(vp+'?deploy=false','POST',payload);created=made.id;assert(created);
+           console.log('Created inactive version '+created);
+           const next=await version(created);
+           assert.equal(canon(stable(next)),canon(stable(old)),'Inactive version backend/config/binding mismatch');
+           assert(next.urls?.length,'No preview URL');
+           const preview=next.urls.find(u=>u.startsWith('https://')&&new URL(u).hostname.endsWith('.matthias-homan.workers.dev'));assert(preview);
+           for(const p of newPaths){assert.equal(hash(await bytes(preview.replace(/\/$/,'')+'/'+p.slice(7))),hash(fs.readFileSync(p)),'Preview asset mismatch: '+p);}
+           assert.equal(canon(globalStable(await api(`/workers/workers/${WORKER}`))),canon(globalStable(globalBefore)),'Global settings changed');
+           console.log('Inactive version verified: exact backend, config, all17 bindings, all25 assets');
+           assert.equal(await active(),EXPECTED,'Concurrent deployment before traffic switch');
+           await api(dp,'POST',{strategy:'percentage',versions:[{version_id:created,percentage:100}]});switched=true;
+           assert.equal(await active(),created,'Traffic switch not confirmed');
+           // Version skew is expected briefly. The controller owns any later public-byte recheck.
+           const now=await version(created);assert.equal(canon(stable(now)),canon(stable(old)));
+           assert.equal(canon(globalStable(await api(`/workers/workers/${WORKER}`))),canon(globalStable(globalBefore)));
+           console.log('W05_PUBLISHED '+JSON.stringify({version:created,previous:EXPECTED,preview,backend_sha256:CODE_HASH,asset_count:25}));
+          }catch(e){
+           console.error('Stopped: '+e.message);
+           if(switched){
+            try{assert.equal(await active(),created,'Concurrent change prevents automatic rollback');await api(dp,'POST',{strategy:'percentage',versions:[{version_id:EXPECTED,percentage:100}]});assert.equal(await active(),EXPECTED);console.log('Rolled back to '+EXPECTED);}catch(r){console.error('ROLLBACK REQUIRES CHECK: '+r.message);}
+           }
+           process.exitCode=1;
+          }
+          W05SCRIPT
+          node "$RUNNER_TEMP/publish-w05.mjs"
